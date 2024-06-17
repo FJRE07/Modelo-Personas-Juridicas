@@ -1,0 +1,20 @@
+CREATE TABLE sb_gf.ml_ready_reentrenamiento_simplai_2024_vf_10_personas_juridicas AS
+SELECT 
+	d.*,
+	c.des_cliente,
+	c.id_grupo,
+	c.des_grupo,
+	c.id_activo as id_activo_personas_juridicas
+FROM sb_gf.ml_ready_reentrenamiento_simplai_2024_vf_10 d
+LEFT JOIN (SELECT 
+				a.id_cliente,
+				a.id_grupo,
+				a.id_activo,
+				b.des_cliente,
+				b.cve_grupo,
+				b.des_grupo
+			FROM sb_gf.tabla_clientes_inactivos_personas_fisicas_abril_2024 a
+			LEFT JOIN sb_gf.cat_grupos_gesfin_simplai b 
+			ON a.id_grupo=b.cve_grupo) c
+ON d.buc_cliente =c.id_cliente
+WHERE d.cod_tip_persona ="J"
