@@ -1,0 +1,1585 @@
+CREATE TABLE sb_gf.tabla_movimientos_simplai_nivel_cliente_noviembre_2021_nuevo AS
+SELECT 
+	paso_2.fec_info, 
+	paso_2.num_contrato, 
+	--INGRESOS TOTALES--
+	SUM(CASE WHEN  paso_2.ind_cargo_abono = "H" THEN paso_2.imp_operacion ELSE 0 END) ingresos_totales,
+	--GASTOS TOTALES--
+	SUM(CASE WHEN  paso_2.ind_cargo_abono = "D" THEN paso_2.imp_operacion ELSE 0 END) gastos_totales,
+	--1.GASTOS BLANDOS--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="GASTOS_BLANDOS" THEN paso_2.imp_operacion ELSE 0 END) AS GASTOS_BLANDOS,
+	--2.INGRESOS BLANDOS--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="INGRESOS_BLANDOS" THEN paso_2.imp_operacion ELSE 0 END) AS INGRESOS_BLANDOS,
+	--3.GASTOS CONSUMO--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="GASTOS_CONSUMO" THEN paso_2.imp_operacion ELSE 0 END) AS GASTOS_CONSUMO,
+	--4.GASTOS TRANSFERENCIA--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="GASTOS_TRANSFERENCIA" THEN paso_2.imp_operacion ELSE 0 END) AS GASTOS_TRANSFERENCIA,
+	--5.INGRESOS TRANSFERENCIA--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="INGRESOS_TRANSFERENCIA" THEN paso_2.imp_operacion ELSE 0 END) AS INGRESOS_TRANSFERENCIA,
+    --6.GASTOS EFECTIVO--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="GASTOS_EFECTIVO" THEN paso_2.imp_operacion ELSE 0 END) AS GASTOS_EFECTIVO,
+	--7.INGRESOS EFECTIVO--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="INGRESOS_EFECTIVO" THEN paso_2.imp_operacion ELSE 0 END) AS INGRESOS_EFECTIVO,
+	--8.GASTOS FINANCIEROS--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="GASTOS_FINANCIEROS" THEN paso_2.imp_operacion ELSE 0 END) AS GASTOS_FINANCIEROS,
+	--9.INGRESOS FINANCIEROS--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="INGRESOS_FINANCIEROS" THEN paso_2.imp_operacion ELSE 0 END) AS INGRESOS_FINANCIEROS,
+	--10.INGRESOS DUROS--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="INGRESOS_DUROS" THEN paso_2.imp_operacion ELSE 0 END) AS INGRESOS_DUROS,
+	--11.GASTOS AHORRO--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="GASTOS_AHORRO" THEN paso_2.imp_operacion ELSE 0 END) AS GASTOS_AHORRO,
+	--12.INGRESOS AHORRO--
+	SUM(CASE WHEN paso_2.indicador_agrupado ="INGRESOS_AHORRO" THEN paso_2.imp_operacion ELSE 0 END) AS INGRESOS_AHORRO
+FROM (SELECT 
+		paso_1.*,
+		CASE 
+			-- CASOS PUNTUALES--
+			WHEN (paso_1.ind_cargo_abono = 'D') AND paso_1.txt_alfa_grande IN ("CUOTA AFILIACION TPV",
+			"COM REPOSICION TARJETA DEBITO") THEN 'GASTOS_BLANDOS'
+			WHEN (paso_1.ind_cargo_abono = 'D') AND paso_1.txt_alfa_grande IN ("COMISION MUNDO SELECT",
+			"COMISION SANTANDER SELECT","APORT LINEA CAPTURA INTERNET","PAGO DE PENSION ALIMENTICA",
+			"CARGO POR PAGO DE PENSION") THEN 'GASTOS_CONSUMO'
+			WHEN (paso_1.ind_cargo_abono = 'D') AND paso_1.txt_alfa_grande IN ("COM CHEQUE DIGITAL ANUALIDAD",
+			"COM PAGADAS VENTAS TARJ DEB","CARGO POR VENTA DE DIVISAS","COM DE CHEQUERAS SEGURIDAD",
+			"COMISION CHEQUERAS ESPECIALES","COM CHEQUERA POLIZA ESTANDAR","COBROS CONFIRMING",
+			"SDO A FAVOR SANT TC PGOS") THEN 'GASTOS_FINANCIEROS'
+			WHEN (paso_1.ind_cargo_abono = 'D') AND paso_1.txt_alfa_grande IN ("COM CHEQUE DIGITAL ANUALIDAD",
+			"COM PAGADAS VENTAS TARJ DEB","CARGO POR VENTA DE DIVISAS","COM DE CHEQUERAS SEGURIDAD",
+			"COMISION CHEQUERAS ESPECIALES","COM CHEQUERA POLIZA ESTANDAR") THEN 'GASTOS_FINANCIEROS'
+			WHEN (paso_1.ind_cargo_abono = 'H') AND paso_1.txt_alfa_grande IN ("ISR INVERSION PLAZO") THEN 'INGRESOS_BLANDOS'
+			WHEN (paso_1.ind_cargo_abono = 'H') AND paso_1.txt_alfa_grande IN ("ABO ACLA SEGUROS TARJ DEB",
+			"LIQUIDACION AMEX") THEN 'INGRESOS_FINANCIEROS'
+			--TEXT MINING--
+			------------------------------------------------------------------------------------
+			--GASTOS BLANDOS--
+			WHEN (paso_1.ind_cargo_abono = 'D') AND 
+			(paso_1.txt_alfa_grande LIKE "%CANCEL%" OR
+			paso_1.txt_alfa_grande LIKE "%RECHAZO%" OR
+			(paso_1.txt_alfa_grande LIKE "%ANU%" AND paso_1.txt_alfa_grande NOT LIKE "%MANUA%" AND paso_1.txt_alfa_grande NOT LIKE "%ANUALIDAD%") OR
+			(paso_1.txt_alfa_grande LIKE "%DEV%" AND paso_1.txt_alfa_grande NOT LIKE "%DEVENGADA%") OR
+			(paso_1.txt_alfa_grande LIKE "%TRAS%" AND paso_1.txt_alfa_grande NOT LIKE "%OTRAS%" AND paso_1.txt_alfa_grande NOT LIKE "%TRASFER%" AND paso_1.txt_alfa_grande NOT LIKE "%TRASLADO%"))
+			THEN "GASTOS_BLANDOS"
+			-- INGRESOS BLANDOS--
+			WHEN (paso_1.ind_cargo_abono = 'H') AND 
+			(paso_1.txt_alfa_grande LIKE "%CANCEL%" OR
+			paso_1.txt_alfa_grande LIKE "%RECHAZO%" OR
+			(paso_1.txt_alfa_grande LIKE "%ANU%" AND paso_1.txt_alfa_grande NOT LIKE "%MANUA%" AND paso_1.txt_alfa_grande NOT LIKE "%ANUALIDAD%") OR
+			(paso_1.txt_alfa_grande LIKE "%DEV%" AND paso_1.txt_alfa_grande NOT LIKE "%DEVENGADA%") OR
+			(paso_1.txt_alfa_grande LIKE "%TRAS%" AND paso_1.txt_alfa_grande NOT LIKE "%OTRAS%" AND paso_1.txt_alfa_grande NOT LIKE "%TRASFER%" AND paso_1.txt_alfa_grande NOT LIKE "%TRASLADO%"))
+			THEN "INGRESOS_BLANDOS"
+			------------------------------------------------------------------------------------
+			--GASTOS_CONSUMO--
+			WHEN (paso_1.ind_cargo_abono = 'D') AND 
+			(paso_1.txt_alfa_grande LIKE "%CONSUMO%" OR
+			paso_1.txt_alfa_grande LIKE "%CARGO POR PAGO DE SUBSIDIOS%" OR
+			paso_1.txt_alfa_grande LIKE "%ACLARACION COMPRA%" OR
+			paso_1.txt_alfa_grande LIKE "%TIEMPO AIRE%" OR
+			paso_1.txt_alfa_grande LIKE "%MEMBRESIA%" OR
+			paso_1.txt_alfa_grande LIKE "%TU PLUS POR EL SUPER%" OR
+			paso_1.txt_alfa_grande LIKE "%CONSUMIR%" OR
+			paso_1.txt_alfa_grande LIKE "%VIVIENDA%" OR
+			paso_1.txt_alfa_grande LIKE "%GASTOS MEDICOS%" OR
+			paso_1.txt_alfa_grande LIKE "%PAGO DE SERVICIOS%" OR
+			paso_1.txt_alfa_grande LIKE "%PAGO SERVICIO%" OR
+			(paso_1.txt_alfa_grande LIKE "%CEL%" AND paso_1.txt_alfa_grande NOT LIKE "%TRASF%"))
+			THEN "GASTOS_CONSUMO"
+			--INGRESOS_CONSUMO (SE VA A BLANDOS)--
+			WHEN (paso_1.ind_cargo_abono = 'H') AND 
+			(paso_1.txt_alfa_grande LIKE "%CONSUMO%" OR
+			paso_1.txt_alfa_grande LIKE "%CARGO POR PAGO DE SUBSIDIOS%" OR
+			paso_1.txt_alfa_grande LIKE "%ACLARACION COMPRA%" OR
+			paso_1.txt_alfa_grande LIKE "%TIEMPO AIRE%" OR
+			paso_1.txt_alfa_grande LIKE "%MEMBRESIA%" OR
+			paso_1.txt_alfa_grande LIKE "%TU PLUS POR EL SUPER%" OR
+			paso_1.txt_alfa_grande LIKE "%CONSUMIR%" OR
+			paso_1.txt_alfa_grande LIKE "%VIVIENDA%" OR
+			paso_1.txt_alfa_grande LIKE "%GASTOS MEDICOS%" OR
+			paso_1.txt_alfa_grande LIKE "%PAGO DE SERVICIOS%" OR
+			paso_1.txt_alfa_grande LIKE "%PAGO SERVICIO%" OR
+			(paso_1.txt_alfa_grande LIKE "%CEL%" AND paso_1.txt_alfa_grande NOT LIKE "%TRASF%"))
+			THEN "INGRESOS_BLANDOS"
+			------------------------------------------------------------------------------------
+			--GASTOS TRANSFERENCIA--
+			WHEN (paso_1.ind_cargo_abono = 'D') AND 
+			(paso_1.txt_alfa_grande LIKE "%SPEI%" OR
+			paso_1.txt_alfa_grande LIKE "%TRASFES%" OR
+			paso_1.txt_alfa_grande LIKE "%TRANFE%" OR
+			paso_1.txt_alfa_grande LIKE "%TRANS%")
+			THEN "GASTOS_TRANSFERENCIA"
+			--GASTOS TRANSFERENCIA--
+			WHEN (paso_1.ind_cargo_abono = 'H') AND 
+			(paso_1.txt_alfa_grande LIKE "%SPEI%" OR
+			paso_1.txt_alfa_grande LIKE "%TRASFES%" OR
+			paso_1.txt_alfa_grande LIKE "%TRANFE%" OR
+			paso_1.txt_alfa_grande LIKE "%TRANS%")
+			THEN "INGRESOS_TRANSFERENCIA"
+			------------------------------------------------------------------------------------
+			--GASTOS EFECTIVO--			
+			WHEN (paso_1.ind_cargo_abono = 'D') AND 
+			(paso_1.txt_alfa_grande LIKE "%EFEC%" OR
+			paso_1.txt_alfa_grande LIKE "%EFVO%" OR
+			(paso_1.txt_alfa_grande LIKE "%DEB%" AND paso_1.txt_alfa_grande NOT LIKE "%IVA%" AND paso_1.txt_alfa_grande LIKE "%ACLARACION%")OR
+			paso_1.txt_alfa_grande LIKE "%CHEQUE%")
+			THEN "GASTOS_EFECTIVO"
+			--INGRESOS EFECTIVO--			
+			WHEN (paso_1.ind_cargo_abono = 'H') AND 
+			(paso_1.txt_alfa_grande LIKE "%EFEC%" OR
+			paso_1.txt_alfa_grande LIKE "%EFVO%" OR
+			(paso_1.txt_alfa_grande LIKE "%DEB%" AND paso_1.txt_alfa_grande NOT LIKE "%IVA%" AND paso_1.txt_alfa_grande LIKE "%ACLARACION%")OR
+			paso_1.txt_alfa_grande LIKE "%CHEQUE%")
+			THEN "INGRESOS_EFECTIVO"
+			------------------------------------------------------------------------------------
+			--GASTOS DUROS (SE VAN A GASTOS FINANCIEROS)--												
+			WHEN (paso_1.ind_cargo_abono = 'D') AND 
+			(paso_1.txt_alfa_grande LIKE "%NOMINA%" OR
+			paso_1.txt_alfa_grande LIKE "%RENTA%" OR
+			paso_1.txt_alfa_grande LIKE "%DEB%" OR
+			paso_1.txt_alfa_grande LIKE "%DEPOSITO VENTAS%" OR
+			paso_1.txt_alfa_grande LIKE "%VIATICOS%" OR
+			paso_1.txt_alfa_grande LIKE "%ARREND%" OR
+			paso_1.txt_alfa_grande LIKE "%PROVEEDORES%" OR
+			paso_1.txt_alfa_grande LIKE "%FINIQUITO%" OR
+			paso_1.txt_alfa_grande LIKE "%FACTURA%" OR
+			paso_1.txt_alfa_grande LIKE "%REMESA%" OR
+			paso_1.txt_alfa_grande LIKE "%HONORARIOS%" OR
+			paso_1.txt_alfa_grande LIKE "%PENSION%")
+			THEN "GASTOS_FINANCIEROS"
+			--INGRESOS DUROS--
+			WHEN (paso_1.ind_cargo_abono = 'H') AND 
+			(paso_1.txt_alfa_grande LIKE "%NOMINA%" OR
+			paso_1.txt_alfa_grande LIKE "%RENTA%" OR
+			paso_1.txt_alfa_grande LIKE "%DEB%" OR
+			paso_1.txt_alfa_grande LIKE "%DEPOSITO VENTAS%" OR
+			paso_1.txt_alfa_grande LIKE "%VIATICOS%" OR
+			paso_1.txt_alfa_grande LIKE "%ARREND%" OR
+			paso_1.txt_alfa_grande LIKE "%PROVEEDORES%" OR
+			paso_1.txt_alfa_grande LIKE "%FINIQUITO%" OR
+			paso_1.txt_alfa_grande LIKE "%FACTURA%" OR
+			paso_1.txt_alfa_grande LIKE "%REMESA%" OR
+			paso_1.txt_alfa_grande LIKE "%HONORARIOS%" OR
+			paso_1.txt_alfa_grande LIKE "%PENSION%")
+			THEN "INGRESOS_DUROS"
+			------------------------------------------------------------------------------------
+			--GASTOS FINANCIEROS--																			
+			WHEN (paso_1.ind_cargo_abono = 'D') AND 
+			(paso_1.txt_alfa_grande LIKE "%SEGURO%" OR
+			paso_1.txt_alfa_grande LIKE "%DIVISAS%" OR
+			paso_1.txt_alfa_grande LIKE "%MONEDA%" OR
+			paso_1.txt_alfa_grande LIKE "%FIDEICOMISO%" OR
+			paso_1.txt_alfa_grande LIKE "%CASHBACK%" OR
+			paso_1.txt_alfa_grande LIKE "%REM FAMILIAR%" OR
+			paso_1.txt_alfa_grande LIKE "%OPER%" OR
+			paso_1.txt_alfa_grande LIKE "%COBRANZA%" OR
+			paso_1.txt_alfa_grande LIKE "%CUOTA%" OR
+			paso_1.txt_alfa_grande LIKE "%LINEA LCI%" OR
+			paso_1.txt_alfa_grande LIKE "%FONDOS%" OR
+			paso_1.txt_alfa_grande LIKE "%INTERES%" OR
+			paso_1.txt_alfa_grande LIKE "%INV CRECI%" OR
+			paso_1.txt_alfa_grande LIKE "%PRIMA%" OR
+			paso_1.txt_alfa_grande LIKE "%FIANZA%" OR
+			paso_1.txt_alfa_grande LIKE "%PRESTAMO%" OR
+			paso_1.txt_alfa_grande LIKE "%TASA%" OR
+			paso_1.txt_alfa_grande LIKE "%INTERESES%" OR
+			paso_1.txt_alfa_grande LIKE "%DEPOSITO SALVO%" OR
+			paso_1.txt_alfa_grande LIKE "%INVERSION%" OR
+			(paso_1.txt_alfa_grande LIKE "%VENTA%" AND paso_1.txt_alfa_grande NOT LIKE "%VENTANILLA%" ) OR
+			paso_1.txt_alfa_grande LIKE "%DEPOSITOS%" OR
+			paso_1.txt_alfa_grande LIKE "%SINIESTRO%" OR
+			paso_1.txt_alfa_grande LIKE "%PAGO POR SUBSIDIOS%" OR
+			paso_1.txt_alfa_grande LIKE "%CRED%")
+			THEN "GASTOS_FINANCIEROS"
+			--INGRESOS FINANCIEROS--	
+			WHEN (paso_1.ind_cargo_abono = 'H') AND 
+			(paso_1.txt_alfa_grande LIKE "%SEGURO%" OR
+			paso_1.txt_alfa_grande LIKE "%DIVISAS%" OR
+			paso_1.txt_alfa_grande LIKE "%MONEDA%" OR
+			paso_1.txt_alfa_grande LIKE "%FIDEICOMISO%" OR
+			paso_1.txt_alfa_grande LIKE "%CASHBACK%" OR
+			paso_1.txt_alfa_grande LIKE "%REM FAMILIAR%" OR
+			paso_1.txt_alfa_grande LIKE "%OPER%" OR
+			paso_1.txt_alfa_grande LIKE "%COBRANZA%" OR
+			paso_1.txt_alfa_grande LIKE "%CUOTA%" OR
+			paso_1.txt_alfa_grande LIKE "%LINEA LCI%" OR
+			paso_1.txt_alfa_grande LIKE "%FONDOS%" OR
+			paso_1.txt_alfa_grande LIKE "%INTERES%" OR
+			paso_1.txt_alfa_grande LIKE "%INV CRECI%" OR
+			paso_1.txt_alfa_grande LIKE "%PRIMA%" OR
+			paso_1.txt_alfa_grande LIKE "%FIANZA%" OR
+			paso_1.txt_alfa_grande LIKE "%PRESTAMO%" OR
+			paso_1.txt_alfa_grande LIKE "%TASA%" OR
+			paso_1.txt_alfa_grande LIKE "%INTERESES%" OR
+			paso_1.txt_alfa_grande LIKE "%DEPOSITO SALVO%" OR
+			paso_1.txt_alfa_grande LIKE "%INVERSION%" OR
+			(paso_1.txt_alfa_grande LIKE "%VENTA%" AND paso_1.txt_alfa_grande NOT LIKE "%VENTANILLA%" ) OR
+			paso_1.txt_alfa_grande LIKE "%DEPOSITOS%" OR
+			paso_1.txt_alfa_grande LIKE "%SINIESTRO%" OR
+			paso_1.txt_alfa_grande LIKE "%PAGO POR SUBSIDIOS%" OR
+			paso_1.txt_alfa_grande LIKE "%CRED%")
+			THEN "INGRESOS_FINANCIEROS"
+			------------------------------------------------------------------------------------
+			--GASTOS AHORRO--																				
+			WHEN (paso_1.ind_cargo_abono = 'D') AND 
+			(paso_1.txt_alfa_grande LIKE "%ACCIONES%" OR
+			paso_1.txt_alfa_grande LIKE "%APORTACION%" OR
+			paso_1.txt_alfa_grande LIKE "%RETIRO%" OR
+			paso_1.txt_alfa_grande LIKE "%AHORRO%")
+			THEN "GASTOS_AHORRO"
+			--INGRESOS AHORRO--																				
+			WHEN (paso_1.ind_cargo_abono = 'H') AND 
+			(paso_1.txt_alfa_grande LIKE "%ACCIONES%" OR
+			paso_1.txt_alfa_grande LIKE "%APORTACION%" OR
+			paso_1.txt_alfa_grande LIKE "%RETIRO%" OR
+			paso_1.txt_alfa_grande LIKE "%AHORRO%")
+			THEN "INGRESOS_AHORRO"
+			------------------------------------------------------------------------------------
+			--OTROS GASTOS BLANDOS--																				
+			WHEN (paso_1.ind_cargo_abono = 'D') THEN "GASTOS_BLANDOS"
+			--OTROS INGRESOS BLANDOS--																				
+			WHEN (paso_1.ind_cargo_abono = 'H') THEN "INGRESOS_BLANDOS"
+			END AS indicador_agrupado
+		FROM (SELECT 
+				B.fec_operacion,
+				CAST(CONCAT(SUBSTRING(B.fec_operacion, 1, 4),
+					SUBSTRING(B.fec_operacion, 6, 2),
+					SUBSTRING(B.fec_operacion, 9, 2)) AS INT) AS fec_operacion_int,
+				CAST(CONCAT(SUBSTRING(B.fec_operacion, 1, 4),
+					SUBSTRING(B.fec_operacion, 6, 2)) AS INT) * 100 AS fec_operacion_mes,
+				CAST(CONCAT(SUBSTRING(B.fec_operacion, 1, 4),
+					SUBSTRING(B.fec_operacion, 6, 2)) AS INT) AS fec_info,
+				B.fec_particion_datos,
+				B.ind_cargo_abono,
+				B.num_contrato,
+				B.imp_operacion,
+				B.imp_autorizacion_operacion,
+				A.cve_operacion,
+				A.txt_alfa_grande
+			FROM 
+				af_cuentas_personales.det_movimiento_consulta  B 
+			LEFT JOIN  
+				(SELECT DISTINCT txt_alfa_grande,cve_operacion FROM af_cuentas_personales.det_comisiones) A 
+			ON 
+				A.cve_operacion = B.cve_operacion
+			WHERE 
+				CAST(CONCAT(SUBSTRING(B.fec_operacion, 1, 4), SUBSTRING(B.fec_operacion, 6, 2)) AS INT) IN (202111)) paso_1) paso_2
+GROUP BY fec_info, num_contrato;
+
+
+diccionario={
+        202108:'tabla_movimientos_simplai_nivel_cliente_2021_agosto_nuevo'
+        }
+
+for mes in diccionario.keys():
+        base=diccionario[mes]
+        spark.sql('DROP VIEW IF EXISTS sb_gf.agregacion_transaccional_paso_1')
+        spark.sql(f'''CREATE VIEW sb_gf.agregacion_transaccional_paso_1 AS
+                SELECT 
+                        max(buc_cliente) as buc_cliente,
+                        num_cuenta,
+                        ROUND(fec_data/100, 0) AS fec_info 
+                FROM 
+                        sb_gf.captacion
+                WHERE 
+                        ROUND(fec_data/100, 0) ={mes}
+                GROUP BY ROUND(fec_data/100, 0),num_cuenta''')
+
+        spark.sql(f'''CREATE TABLE sb_gf.agregacion_transaccional_paso_2 
+                SELECT
+                        a.fec_info,
+                        a.buc_cliente,
+                        SUM(b.ingresos_totales) AS ingresos_totales, 
+                        SUM(b.gastos_totales) AS gastos_totales, 
+                        SUM(b.GASTOS_BLANDOS) AS GASTOS_BLANDOS, 
+                        SUM(b.INGRESOS_BLANDOS) AS INGRESOS_BLANDOS, 
+                        SUM(b.GASTOS_CONSUMO) AS GASTOS_CONSUMO, 
+                        SUM(b.GASTOS_TRANSFERENCIA) AS GASTOS_TRANSFERENCIA, 
+                        SUM(b.INGRESOS_TRANSFERENCIA) AS INGRESOS_TRANSFERENCIA, 
+                        SUM(b.GASTOS_EFECTIVO) AS GASTOS_EFECTIVO, 
+                        SUM(b.INGRESOS_EFECTIVO) AS INGRESOS_EFECTIVO, 
+                        SUM(b.GASTOS_FINANCIEROS) AS GASTOS_FINANCIEROS, 
+                        SUM(b.INGRESOS_FINANCIEROS) AS INGRESOS_FINANCIEROS, 
+                        SUM(b.INGRESOS_DUROS) AS INGRESOS_DUROS, 
+                        SUM(b.GASTOS_AHORRO) AS GASTOS_AHORRO,
+                        SUM(b.INGRESOS_AHORRO) AS INGRESOS_AHORRO
+                FROM 
+                        sb_gf.agregacion_transaccional_paso_1 a
+                LEFT JOIN 
+                        sb_gf.{base} b
+                ON 
+                        a.num_cuenta=b.num_contrato AND a.fec_info=b.fec_info
+                GROUP BY 
+                        a.fec_info,a.buc_cliente''')
+        spark.sql('DROP VIEW IF EXISTS sb_gf.agregacion_transaccional_paso_1')
+
+        spark.sql(f'''INSERT INTO TABLE sb_gf.tabla_movimientos_mensual_nivel_cliente
+		   		PARTITION(fec_info={mes})
+				   	SELECT 
+				   		buc_cliente,
+						ingresos_totales,
+						gastos_totales,
+						gastos_blandos,
+						ingresos_blandos,
+						gastos_consumo,
+						gastos_transferencia,
+						ingresos_transferencia,
+						gastos_efectivo,
+						ingresos_efectivo,
+						gastos_financieros,
+						ingresos_financieros,
+						ingresos_duros,
+						gastos_ahorro,
+						ingresos_ahorro
+					FROM
+						sb_gf.agregacion_transaccional_paso_2
+					WHERE fec_info={mes}''')
+        spark.sql('DROP TABLE IF EXISTS sb_gf.agregacion_transaccional_paso_2')
+
+
+
+fec_info_input=202212
+
+spark.sql("USE sb_gf")
+
+def meses_necesarios(yyyymm, num_meses=6):
+    '''Función que regresa meses pasados con base al mes en obversación y el número de meses deseados
+    Ejemplo:
+    meses_necesarios("202301",4)
+    Resultado ['202301','202212','202211','202210']
+    '''           
+    fecha_inicial = datetime.strptime(yyyymm, "%Y%m") 
+    meses = [(fecha_inicial - relativedelta(months=i)).strftime("%Y%m") for i in range(num_meses)]
+    return meses 
+
+
+meses=meses_necesarios(str(fec_info_input),6)
+meses_tupla="(" + ", ".join(["{}".format(fecha_str) for fecha_str in meses]) + ")"
+
+spark.sql(f'DROP VIEW IF EXISTS sb_gf.tabla_movimientos_indicadores_00_{fec_info_input}')
+spark.sql(f'''CREATE VIEW sb_gf.tabla_movimientos_indicadores_00_{fec_info_input} AS
+          SELECT
+                *,
+                ingresos_totales + gastos_totales  AS cap_ahorro_total,
+                ingresos_duros + gastos_totales  AS cap_ahorro_dura,
+                ingresos_totales + (gastos_totales - gastos_blandos) AS cap_ahorro_aumentada
+          FROM sb_gf.{base} 
+        WHERE fec_info IN {meses_tupla}''')
+
+spark.sql(f'DROP VIEW IF EXISTS sb_gf.tabla_movimientos_indicadores_01_{fec_info_input}')
+spark.sql(f'''CREATE VIEW sb_gf.tabla_movimientos_indicadores_01_{fec_info_input} AS
+            SELECT 
+                {fec_info_input} as fec_info, 
+                buc_cliente,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --1.INGRESOS TOTALES---
+                SUM(CASE WHEN fec_info={meses[0]} THEN ingresos_totales END) as ingreso_total_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN ingresos_totales END) as ingreso_total_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN ingresos_totales END) as ingreso_total_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN ingresos_totales END) as ingreso_total_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN ingresos_totales END) as ingreso_total_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN ingresos_totales END) as ingreso_total_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --2.GASTOS TOTALES---
+                SUM(CASE WHEN fec_info={meses[0]} THEN gastos_totales END) as gasto_total_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN gastos_totales END) as gasto_total_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN gastos_totales END) as gasto_total_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN gastos_totales END) as gasto_total_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN gastos_totales END) as gasto_total_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN gastos_totales END) as gasto_total_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --3.GASTOS BLANDOS--
+                SUM(CASE WHEN fec_info={meses[0]} THEN gastos_blandos END) as gastos_blandos_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN gastos_blandos END) as gastos_blandos_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN gastos_blandos END) as gastos_blandos_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN gastos_blandos END) as gastos_blandos_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN gastos_blandos END) as gastos_blandos_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN gastos_blandos END) as gastos_blandos_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --4.INGRESOS BLANDOS--
+                SUM(CASE WHEN fec_info={meses[0]} THEN ingresos_blandos END) as ingresos_blandos_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN ingresos_blandos END) as ingresos_blandos_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN ingresos_blandos END) as ingresos_blandos_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN ingresos_blandos END) as ingresos_blandos_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN ingresos_blandos END) as ingresos_blandos_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN ingresos_blandos END) as ingresos_blandos_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --5.GASTOS TRANSFERENCIA--
+                SUM(CASE WHEN fec_info={meses[0]} THEN gastos_transferencia END) as gastos_transferencia_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN gastos_transferencia END) as gastos_transferencia_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN gastos_transferencia END) as gastos_transferencia_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN gastos_transferencia END) as gastos_transferencia_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN gastos_transferencia END) as gastos_transferencia_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN gastos_transferencia END) as gastos_transferencia_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --6.INGRESOS TRANSFERENCIA--
+                SUM(CASE WHEN fec_info={meses[0]} THEN ingresos_transferencia END) as ingresos_transferencia_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN ingresos_transferencia END) as ingresos_transferencia_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN ingresos_transferencia END) as ingresos_transferencia_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN ingresos_transferencia END) as ingresos_transferencia_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN ingresos_transferencia END) as ingresos_transferencia_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN ingresos_transferencia END) as ingresos_transferencia_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --7.GASTOS EFECTIVO--
+                SUM(CASE WHEN fec_info={meses[0]} THEN gastos_efectivo END) as gastos_efectivo_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN gastos_efectivo END) as gastos_efectivo_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN gastos_efectivo END) as gastos_efectivo_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN gastos_efectivo END) as gastos_efectivo_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN gastos_efectivo END) as gastos_efectivo_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN gastos_efectivo END) as gastos_efectivo_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --8.INGRESOS EFECTIVO--
+                SUM(CASE WHEN fec_info={meses[0]} THEN ingresos_efectivo END) as ingresos_efectivo_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN ingresos_efectivo END) as ingresos_efectivo_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN ingresos_efectivo END) as ingresos_efectivo_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN ingresos_efectivo END) as ingresos_efectivo_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN ingresos_efectivo END) as ingresos_efectivo_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN ingresos_efectivo END) as ingresos_efectivo_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --9.GASTOS FINANCIEROS--
+                SUM(CASE WHEN fec_info={meses[0]} THEN gastos_financieros END) as gastos_financieros_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN gastos_financieros END) as gastos_financieros_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN gastos_financieros END) as gastos_financieros_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN gastos_financieros END) as gastos_financieros_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN gastos_financieros END) as gastos_financieros_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN gastos_financieros END) as gastos_financieros_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --10.INGRESOS FINANCIEROS--
+                SUM(CASE WHEN fec_info={meses[0]} THEN ingresos_financieros END) as ingresos_financieros_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN ingresos_financieros END) as ingresos_financieros_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN ingresos_financieros END) as ingresos_financieros_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN ingresos_financieros END) as ingresos_financieros_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN ingresos_financieros END) as ingresos_financieros_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN ingresos_financieros END) as ingresos_financieros_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --11.GASTOS CONSUMO--
+                SUM(CASE WHEN fec_info={meses[0]} THEN gastos_consumo END) as gastos_consumo_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN gastos_consumo END) as gastos_consumo_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN gastos_consumo END) as gastos_consumo_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN gastos_consumo END) as gastos_consumo_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN gastos_consumo END) as gastos_consumo_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN gastos_consumo END) as gastos_consumo_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --12.INGRESOS DUROS--
+                SUM(CASE WHEN fec_info={meses[0]} THEN ingresos_duros END) as ingresos_duros_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN ingresos_duros END) as ingresos_duros_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN ingresos_duros END) as ingresos_duros_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN ingresos_duros END) as ingresos_duros_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN ingresos_duros END) as ingresos_duros_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN ingresos_duros END) as ingresos_duros_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --13.GASTOS AHORRO--
+                SUM(CASE WHEN fec_info={meses[0]} THEN gastos_ahorro END) as gastos_ahorro_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN gastos_ahorro END) as gastos_ahorro_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN gastos_ahorro END) as gastos_ahorro_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN gastos_ahorro END) as gastos_ahorro_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN gastos_ahorro END) as gastos_ahorro_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN gastos_ahorro END) as gastos_ahorro_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --14.INGRESOS AHORRO--
+                SUM(CASE WHEN fec_info={meses[0]} THEN ingresos_ahorro END) as ingresos_ahorro_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN ingresos_ahorro END) as ingresos_ahorro_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN ingresos_ahorro END) as ingresos_ahorro_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN ingresos_ahorro END) as ingresos_ahorro_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN ingresos_ahorro END) as ingresos_ahorro_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN ingresos_ahorro END) as ingresos_ahorro_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --15.CAPACIDAD AHORRO TOTAL---
+                SUM(CASE WHEN fec_info={meses[0]} THEN cap_ahorro_total END) as cap_ahorro_total_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN cap_ahorro_total END) as cap_ahorro_total_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN cap_ahorro_total END) as cap_ahorro_total_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN cap_ahorro_total END) as cap_ahorro_total_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN cap_ahorro_total END) as cap_ahorro_total_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN cap_ahorro_total END) as cap_ahorro_total_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --16.CAPACIDAD AHORRO DURA---
+                SUM(CASE WHEN fec_info={meses[0]} THEN cap_ahorro_dura END) as cap_ahorro_dura_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN cap_ahorro_dura END) as cap_ahorro_dura_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN cap_ahorro_dura END) as cap_ahorro_dura_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN cap_ahorro_dura END) as cap_ahorro_dura_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN cap_ahorro_dura END) as cap_ahorro_dura_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN cap_ahorro_dura END) as cap_ahorro_dura_anterior_5,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --17.CAPACIDAD AHORRO AUMENTADA--
+                SUM(CASE WHEN fec_info={meses[0]} THEN cap_ahorro_aumentada END) as cap_ahorro_aumentada_actual,
+                SUM(CASE WHEN fec_info={meses[1]} THEN cap_ahorro_aumentada END) as cap_ahorro_aumentada_anterior_1,
+                SUM(CASE WHEN fec_info={meses[2]} THEN cap_ahorro_aumentada END) as cap_ahorro_aumentada_anterior_2,
+                SUM(CASE WHEN fec_info={meses[3]} THEN cap_ahorro_aumentada END) as cap_ahorro_aumentada_anterior_3,
+                SUM(CASE WHEN fec_info={meses[4]} THEN cap_ahorro_aumentada END) as cap_ahorro_aumentada_anterior_4,
+                SUM(CASE WHEN fec_info={meses[5]} THEN cap_ahorro_aumentada END) as cap_ahorro_aumentada_anterior_5
+                FROM 
+                    sb_gf.tabla_movimientos_indicadores_00_{fec_info_input}
+                GROUP BY buc_cliente''')
+
+spark.sql(f'''DROP VIEW IF EXISTS sb_gf.tabla_movimientos_indicadores_02_{fec_info_input}''')
+spark.sql(f'''CREATE VIEW sb_gf.tabla_movimientos_indicadores_02_{fec_info_input} AS
+                SELECT 
+                fec_info,
+                        buc_cliente,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --1.INGRESOS TOTALES--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingreso_total_actual IS NOT NULL AND ingreso_total_anterior_1 IS NOT NULL AND ingreso_total_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingreso_total_actual IS NULL AND ingreso_total_anterior_1 IS NOT NULL AND ingreso_total_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingreso_total_actual IS NOT NULL AND ingreso_total_anterior_1 IS  NULL AND ingreso_total_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingreso_total_actual IS NOT NULL AND ingreso_total_anterior_1 IS NOT NULL AND ingreso_total_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingreso_total_actual IS NOT NULL AND ingreso_total_anterior_1 IS NULL AND ingreso_total_anterior_2 IS NULL THEN 1
+				WHEN ingreso_total_actual IS NULL AND ingreso_total_anterior_1 IS NOT NULL AND ingreso_total_anterior_2 IS NULL THEN 1 
+				WHEN ingreso_total_actual IS NULL AND ingreso_total_anterior_1 IS NULL AND ingreso_total_anterior_2 IS NOT NULL THEN 1
+			    END AS ingreso_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingreso_total_anterior_3 IS NOT NULL AND ingreso_total_anterior_4 IS NOT NULL AND ingreso_total_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingreso_total_anterior_3 IS NULL AND ingreso_total_anterior_4 IS NOT NULL AND ingreso_total_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingreso_total_anterior_3 IS NOT NULL AND ingreso_total_anterior_4 IS  NULL AND ingreso_total_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingreso_total_anterior_3 IS NOT NULL AND ingreso_total_anterior_4 IS NOT NULL AND ingreso_total_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingreso_total_anterior_3 IS NOT NULL AND ingreso_total_anterior_4 IS NULL AND ingreso_total_anterior_5 IS NULL THEN 1
+				WHEN ingreso_total_anterior_3 IS NULL AND ingreso_total_anterior_4 IS NOT NULL AND ingreso_total_anterior_5 IS NULL THEN 1 
+				WHEN ingreso_total_anterior_3 IS NULL AND ingreso_total_anterior_4 IS NULL AND ingreso_total_anterior_5 IS NOT NULL THEN 1
+			END AS ingreso_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --2.GASTOS TOTALES--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gasto_total_actual IS NOT NULL AND gasto_total_anterior_1 IS NOT NULL AND gasto_total_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gasto_total_actual IS NULL AND gasto_total_anterior_1 IS NOT NULL AND gasto_total_anterior_2 IS NOT NULL THEN 2 
+				WHEN gasto_total_actual IS NOT NULL AND gasto_total_anterior_1 IS  NULL AND gasto_total_anterior_2 IS NOT NULL THEN 2 
+				WHEN gasto_total_actual IS NOT NULL AND gasto_total_anterior_1 IS NOT NULL AND gasto_total_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gasto_total_actual IS NOT NULL AND gasto_total_anterior_1 IS NULL AND gasto_total_anterior_2 IS NULL THEN 1
+				WHEN gasto_total_actual IS NULL AND gasto_total_anterior_1 IS NOT NULL AND gasto_total_anterior_2 IS NULL THEN 1 
+				WHEN gasto_total_actual IS NULL AND gasto_total_anterior_1 IS NULL AND gasto_total_anterior_2 IS NOT NULL THEN 1
+			END AS gasto_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gasto_total_anterior_3 IS NOT NULL AND gasto_total_anterior_4 IS NOT NULL AND gasto_total_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gasto_total_anterior_3 IS NULL AND gasto_total_anterior_4 IS NOT NULL AND gasto_total_anterior_5 IS NOT NULL THEN 2 
+				WHEN gasto_total_anterior_3 IS NOT NULL AND gasto_total_anterior_4 IS  NULL AND gasto_total_anterior_5 IS NOT NULL THEN 2 
+				WHEN gasto_total_anterior_3 IS NOT NULL AND gasto_total_anterior_4 IS NOT NULL AND gasto_total_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gasto_total_anterior_3 IS NOT NULL AND gasto_total_anterior_4 IS NULL AND gasto_total_anterior_5 IS NULL THEN 1
+				WHEN gasto_total_anterior_3 IS NULL AND gasto_total_anterior_4 IS NOT NULL AND gasto_total_anterior_5 IS NULL THEN 1 
+				WHEN gasto_total_anterior_3 IS NULL AND gasto_total_anterior_4 IS NULL AND gasto_total_anterior_5 IS NOT NULL THEN 1
+			END AS gasto_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --3.GASTOS BLANDOS--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_blandos_actual IS NOT NULL AND gastos_blandos_anterior_1 IS NOT NULL AND gastos_blandos_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_blandos_actual IS NULL AND gastos_blandos_anterior_1 IS NOT NULL AND gastos_blandos_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_blandos_actual IS NOT NULL AND gastos_blandos_anterior_1 IS  NULL AND gastos_blandos_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_blandos_actual IS NOT NULL AND gastos_blandos_anterior_1 IS NOT NULL AND gastos_blandos_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_blandos_actual IS NOT NULL AND gastos_blandos_anterior_1 IS NULL AND gastos_blandos_anterior_2 IS NULL THEN 1
+				WHEN gastos_blandos_actual IS NULL AND gastos_blandos_anterior_1 IS NOT NULL AND gastos_blandos_anterior_2 IS NULL THEN 1 
+				WHEN gastos_blandos_actual IS NULL AND gastos_blandos_anterior_1 IS NULL AND gastos_blandos_anterior_2 IS NOT NULL THEN 1
+			END AS gastos_blandos_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_blandos_anterior_3 IS NOT NULL AND gastos_blandos_anterior_4 IS NOT NULL AND gastos_blandos_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_blandos_anterior_3 IS NULL AND gastos_blandos_anterior_4 IS NOT NULL AND gastos_blandos_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_blandos_anterior_3 IS NOT NULL AND gastos_blandos_anterior_4 IS  NULL AND gastos_blandos_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_blandos_anterior_3 IS NOT NULL AND gastos_blandos_anterior_4 IS NOT NULL AND gastos_blandos_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_blandos_anterior_3 IS NOT NULL AND gastos_blandos_anterior_4 IS NULL AND gastos_blandos_anterior_5 IS NULL THEN 1
+				WHEN gastos_blandos_anterior_3 IS NULL AND gastos_blandos_anterior_4 IS NOT NULL AND gastos_blandos_anterior_5 IS NULL THEN 1 
+				WHEN gastos_blandos_anterior_3 IS NULL AND gastos_blandos_anterior_4 IS NULL AND gastos_blandos_anterior_5 IS NOT NULL THEN 1
+			END AS gastos_blandos_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --4.INGRESOS BLANDOS--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_blandos_actual IS NOT NULL AND ingresos_blandos_anterior_1 IS NOT NULL AND ingresos_blandos_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_blandos_actual IS NULL AND ingresos_blandos_anterior_1 IS NOT NULL AND ingresos_blandos_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_blandos_actual IS NOT NULL AND ingresos_blandos_anterior_1 IS  NULL AND ingresos_blandos_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_blandos_actual IS NOT NULL AND ingresos_blandos_anterior_1 IS NOT NULL AND ingresos_blandos_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_blandos_actual IS NOT NULL AND ingresos_blandos_anterior_1 IS NULL AND ingresos_blandos_anterior_2 IS NULL THEN 1
+				WHEN ingresos_blandos_actual IS NULL AND ingresos_blandos_anterior_1 IS NOT NULL AND ingresos_blandos_anterior_2 IS NULL THEN 1 
+				WHEN ingresos_blandos_actual IS NULL AND ingresos_blandos_anterior_1 IS NULL AND ingresos_blandos_anterior_2 IS NOT NULL THEN 1
+			END AS ingresos_blandos_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_blandos_anterior_3 IS NOT NULL AND ingresos_blandos_anterior_4 IS NOT NULL AND ingresos_blandos_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_blandos_anterior_3 IS NULL AND ingresos_blandos_anterior_4 IS NOT NULL AND ingresos_blandos_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_blandos_anterior_3 IS NOT NULL AND ingresos_blandos_anterior_4 IS  NULL AND ingresos_blandos_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_blandos_anterior_3 IS NOT NULL AND ingresos_blandos_anterior_4 IS NOT NULL AND ingresos_blandos_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_blandos_anterior_3 IS NOT NULL AND ingresos_blandos_anterior_4 IS NULL AND ingresos_blandos_anterior_5 IS NULL THEN 1
+				WHEN ingresos_blandos_anterior_3 IS NULL AND ingresos_blandos_anterior_4 IS NOT NULL AND ingresos_blandos_anterior_5 IS NULL THEN 1 
+				WHEN ingresos_blandos_anterior_3 IS NULL AND ingresos_blandos_anterior_4 IS NULL AND ingresos_blandos_anterior_5 IS NOT NULL THEN 1
+			END AS ingresos_blandos_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --5.GASTOS TRANSFERENCIA--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_transferencia_actual IS NOT NULL AND gastos_transferencia_anterior_1 IS NOT NULL AND gastos_transferencia_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_transferencia_actual IS NULL AND gastos_transferencia_anterior_1 IS NOT NULL AND gastos_transferencia_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_transferencia_actual IS NOT NULL AND gastos_transferencia_anterior_1 IS  NULL AND gastos_transferencia_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_transferencia_actual IS NOT NULL AND gastos_transferencia_anterior_1 IS NOT NULL AND gastos_transferencia_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_transferencia_actual IS NOT NULL AND gastos_transferencia_anterior_1 IS NULL AND gastos_transferencia_anterior_2 IS NULL THEN 1
+				WHEN gastos_transferencia_actual IS NULL AND gastos_transferencia_anterior_1 IS NOT NULL AND gastos_transferencia_anterior_2 IS NULL THEN 1 
+				WHEN gastos_transferencia_actual IS NULL AND gastos_transferencia_anterior_1 IS NULL AND gastos_transferencia_anterior_2 IS NOT NULL THEN 1
+			END AS gastos_transferencia_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_transferencia_anterior_3 IS NOT NULL AND gastos_transferencia_anterior_4 IS NOT NULL AND gastos_transferencia_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_transferencia_anterior_3 IS NULL AND gastos_transferencia_anterior_4 IS NOT NULL AND gastos_transferencia_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_transferencia_anterior_3 IS NOT NULL AND gastos_transferencia_anterior_4 IS  NULL AND gastos_transferencia_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_transferencia_anterior_3 IS NOT NULL AND gastos_transferencia_anterior_4 IS NOT NULL AND gastos_transferencia_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_transferencia_anterior_3 IS NOT NULL AND gastos_transferencia_anterior_4 IS NULL AND gastos_transferencia_anterior_5 IS NULL THEN 1
+				WHEN gastos_transferencia_anterior_3 IS NULL AND gastos_transferencia_anterior_4 IS NOT NULL AND gastos_transferencia_anterior_5 IS NULL THEN 1 
+				WHEN gastos_transferencia_anterior_3 IS NULL AND gastos_transferencia_anterior_4 IS NULL AND gastos_transferencia_anterior_5 IS NOT NULL THEN 1
+			END AS gastos_transferencia_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --6.INGRESOS TRANSFERENCIA--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_transferencia_actual IS NOT NULL AND ingresos_transferencia_anterior_1 IS NOT NULL AND ingresos_transferencia_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_transferencia_actual IS NULL AND ingresos_transferencia_anterior_1 IS NOT NULL AND ingresos_transferencia_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_transferencia_actual IS NOT NULL AND ingresos_transferencia_anterior_1 IS  NULL AND ingresos_transferencia_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_transferencia_actual IS NOT NULL AND ingresos_transferencia_anterior_1 IS NOT NULL AND ingresos_transferencia_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_transferencia_actual IS NOT NULL AND ingresos_transferencia_anterior_1 IS NULL AND ingresos_transferencia_anterior_2 IS NULL THEN 1
+				WHEN ingresos_transferencia_actual IS NULL AND ingresos_transferencia_anterior_1 IS NOT NULL AND ingresos_transferencia_anterior_2 IS NULL THEN 1 
+				WHEN ingresos_transferencia_actual IS NULL AND ingresos_transferencia_anterior_1 IS NULL AND ingresos_transferencia_anterior_2 IS NOT NULL THEN 1
+			END AS ingresos_transferencia_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_transferencia_anterior_3 IS NOT NULL AND ingresos_transferencia_anterior_4 IS NOT NULL AND ingresos_transferencia_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_transferencia_anterior_3 IS NULL AND ingresos_transferencia_anterior_4 IS NOT NULL AND ingresos_transferencia_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_transferencia_anterior_3 IS NOT NULL AND ingresos_transferencia_anterior_4 IS  NULL AND ingresos_transferencia_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_transferencia_anterior_3 IS NOT NULL AND ingresos_transferencia_anterior_4 IS NOT NULL AND ingresos_transferencia_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_transferencia_anterior_3 IS NOT NULL AND ingresos_transferencia_anterior_4 IS NULL AND ingresos_transferencia_anterior_5 IS NULL THEN 1
+				WHEN ingresos_transferencia_anterior_3 IS NULL AND ingresos_transferencia_anterior_4 IS NOT NULL AND ingresos_transferencia_anterior_5 IS NULL THEN 1 
+				WHEN ingresos_transferencia_anterior_3 IS NULL AND ingresos_transferencia_anterior_4 IS NULL AND ingresos_transferencia_anterior_5 IS NOT NULL THEN 1
+			END AS ingresos_transferencia_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --7.GASTOS EFECTIVO--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_efectivo_actual IS NOT NULL AND gastos_efectivo_anterior_1 IS NOT NULL AND gastos_efectivo_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_efectivo_actual IS NULL AND gastos_efectivo_anterior_1 IS NOT NULL AND gastos_efectivo_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_efectivo_actual IS NOT NULL AND gastos_efectivo_anterior_1 IS  NULL AND gastos_efectivo_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_efectivo_actual IS NOT NULL AND gastos_efectivo_anterior_1 IS NOT NULL AND gastos_efectivo_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_efectivo_actual IS NOT NULL AND gastos_efectivo_anterior_1 IS NULL AND gastos_efectivo_anterior_2 IS NULL THEN 1
+				WHEN gastos_efectivo_actual IS NULL AND gastos_efectivo_anterior_1 IS NOT NULL AND gastos_efectivo_anterior_2 IS NULL THEN 1 
+				WHEN gastos_efectivo_actual IS NULL AND gastos_efectivo_anterior_1 IS NULL AND gastos_efectivo_anterior_2 IS NOT NULL THEN 1
+			END AS gastos_efectivo_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_efectivo_anterior_3 IS NOT NULL AND gastos_efectivo_anterior_4 IS NOT NULL AND gastos_efectivo_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_efectivo_anterior_3 IS NULL AND gastos_efectivo_anterior_4 IS NOT NULL AND gastos_efectivo_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_efectivo_anterior_3 IS NOT NULL AND gastos_efectivo_anterior_4 IS  NULL AND gastos_efectivo_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_efectivo_anterior_3 IS NOT NULL AND gastos_efectivo_anterior_4 IS NOT NULL AND gastos_efectivo_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_efectivo_anterior_3 IS NOT NULL AND gastos_efectivo_anterior_4 IS NULL AND gastos_efectivo_anterior_5 IS NULL THEN 1
+				WHEN gastos_efectivo_anterior_3 IS NULL AND gastos_efectivo_anterior_4 IS NOT NULL AND gastos_efectivo_anterior_5 IS NULL THEN 1 
+				WHEN gastos_efectivo_anterior_3 IS NULL AND gastos_efectivo_anterior_4 IS NULL AND gastos_efectivo_anterior_5 IS NOT NULL THEN 1
+			END AS gastos_efectivo_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --8.INGRESOS EFECTIVO--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_efectivo_actual IS NOT NULL AND ingresos_efectivo_anterior_1 IS NOT NULL AND ingresos_efectivo_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_efectivo_actual IS NULL AND ingresos_efectivo_anterior_1 IS NOT NULL AND ingresos_efectivo_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_efectivo_actual IS NOT NULL AND ingresos_efectivo_anterior_1 IS  NULL AND ingresos_efectivo_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_efectivo_actual IS NOT NULL AND ingresos_efectivo_anterior_1 IS NOT NULL AND ingresos_efectivo_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_efectivo_actual IS NOT NULL AND ingresos_efectivo_anterior_1 IS NULL AND ingresos_efectivo_anterior_2 IS NULL THEN 1
+				WHEN ingresos_efectivo_actual IS NULL AND ingresos_efectivo_anterior_1 IS NOT NULL AND ingresos_efectivo_anterior_2 IS NULL THEN 1 
+				WHEN ingresos_efectivo_actual IS NULL AND ingresos_efectivo_anterior_1 IS NULL AND ingresos_efectivo_anterior_2 IS NOT NULL THEN 1
+			END AS ingresos_efectivo_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_efectivo_anterior_3 IS NOT NULL AND ingresos_efectivo_anterior_4 IS NOT NULL AND ingresos_efectivo_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_efectivo_anterior_3 IS NULL AND ingresos_efectivo_anterior_4 IS NOT NULL AND ingresos_efectivo_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_efectivo_anterior_3 IS NOT NULL AND ingresos_efectivo_anterior_4 IS  NULL AND ingresos_efectivo_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_efectivo_anterior_3 IS NOT NULL AND ingresos_efectivo_anterior_4 IS NOT NULL AND ingresos_efectivo_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_efectivo_anterior_3 IS NOT NULL AND ingresos_efectivo_anterior_4 IS NULL AND ingresos_efectivo_anterior_5 IS NULL THEN 1
+				WHEN ingresos_efectivo_anterior_3 IS NULL AND ingresos_efectivo_anterior_4 IS NOT NULL AND ingresos_efectivo_anterior_5 IS NULL THEN 1
+				WHEN ingresos_efectivo_anterior_3 IS NULL AND ingresos_efectivo_anterior_4 IS NULL AND ingresos_efectivo_anterior_5 IS NOT NULL THEN 1
+			END AS ingresos_efectivo_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --9.GASTOS FINANCIEROS--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_financieros_actual IS NOT NULL AND gastos_financieros_anterior_1 IS NOT NULL AND gastos_financieros_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_financieros_actual IS NULL AND gastos_financieros_anterior_1 IS NOT NULL AND gastos_financieros_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_financieros_actual IS NOT NULL AND gastos_financieros_anterior_1 IS  NULL AND gastos_financieros_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_financieros_actual IS NOT NULL AND gastos_financieros_anterior_1 IS NOT NULL AND gastos_financieros_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_financieros_actual IS NOT NULL AND gastos_financieros_anterior_1 IS NULL AND gastos_financieros_anterior_2 IS NULL THEN 1
+				WHEN gastos_financieros_actual IS NULL AND gastos_financieros_anterior_1 IS NOT NULL AND gastos_financieros_anterior_2 IS NULL THEN 1 
+				WHEN gastos_financieros_actual IS NULL AND gastos_financieros_anterior_1 IS NULL AND gastos_financieros_anterior_2 IS NOT NULL THEN 1
+			END AS gastos_financieros_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_financieros_anterior_3 IS NOT NULL AND gastos_financieros_anterior_4 IS NOT NULL AND gastos_financieros_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_financieros_anterior_3 IS NULL AND gastos_financieros_anterior_4 IS NOT NULL AND gastos_financieros_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_financieros_anterior_3 IS NOT NULL AND gastos_financieros_anterior_4 IS  NULL AND gastos_financieros_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_financieros_anterior_3 IS NOT NULL AND gastos_financieros_anterior_4 IS NOT NULL AND gastos_financieros_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_financieros_anterior_3 IS NOT NULL AND gastos_financieros_anterior_4 IS NULL AND gastos_financieros_anterior_5 IS NULL THEN 1
+				WHEN gastos_financieros_anterior_3 IS NULL AND gastos_financieros_anterior_4 IS NOT NULL AND gastos_financieros_anterior_5 IS NULL THEN 1 
+				WHEN gastos_financieros_anterior_3 IS NULL AND gastos_financieros_anterior_4 IS NULL AND gastos_financieros_anterior_5 IS NOT NULL THEN 1
+			END AS gastos_financieros_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --10.INGRESOS FINANCIEROS--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_financieros_actual IS NOT NULL AND ingresos_financieros_anterior_1 IS NOT NULL AND ingresos_financieros_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_financieros_actual IS NULL AND ingresos_financieros_anterior_1 IS NOT NULL AND ingresos_financieros_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_financieros_actual IS NOT NULL AND ingresos_financieros_anterior_1 IS  NULL AND ingresos_financieros_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_financieros_actual IS NOT NULL AND ingresos_financieros_anterior_1 IS NOT NULL AND ingresos_financieros_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_financieros_actual IS NOT NULL AND ingresos_financieros_anterior_1 IS NULL AND ingresos_financieros_anterior_2 IS NULL THEN 1
+				WHEN ingresos_financieros_actual IS NULL AND ingresos_financieros_anterior_1 IS NOT NULL AND ingresos_financieros_anterior_2 IS NULL THEN 1 
+				WHEN ingresos_financieros_actual IS NULL AND ingresos_financieros_anterior_1 IS NULL AND ingresos_financieros_anterior_2 IS NOT NULL THEN 1
+			END AS ingresos_financieros_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_financieros_anterior_3 IS NOT NULL AND ingresos_financieros_anterior_4 IS NOT NULL AND ingresos_financieros_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_financieros_anterior_3 IS NULL AND ingresos_financieros_anterior_4 IS NOT NULL AND ingresos_financieros_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_financieros_anterior_3 IS NOT NULL AND ingresos_financieros_anterior_4 IS  NULL AND ingresos_financieros_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_financieros_anterior_3 IS NOT NULL AND ingresos_financieros_anterior_4 IS NOT NULL AND ingresos_financieros_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_financieros_anterior_3 IS NOT NULL AND ingresos_financieros_anterior_4 IS NULL AND ingresos_financieros_anterior_5 IS NULL THEN 1
+				WHEN ingresos_financieros_anterior_3 IS NULL AND ingresos_financieros_anterior_4 IS NOT NULL AND ingresos_financieros_anterior_5 IS NULL THEN 1 
+				WHEN ingresos_financieros_anterior_3 IS NULL AND ingresos_financieros_anterior_4 IS NULL AND ingresos_financieros_anterior_5 IS NOT NULL THEN 1
+			END AS ingresos_financieros_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --11.GASTOS CONSUMO--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_consumo_actual IS NOT NULL AND gastos_consumo_anterior_1 IS NOT NULL AND gastos_consumo_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_consumo_actual IS NULL AND gastos_consumo_anterior_1 IS NOT NULL AND gastos_consumo_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_consumo_actual IS NOT NULL AND gastos_consumo_anterior_1 IS  NULL AND gastos_consumo_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_consumo_actual IS NOT NULL AND gastos_consumo_anterior_1 IS NOT NULL AND gastos_consumo_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_consumo_actual IS NOT NULL AND gastos_consumo_anterior_1 IS NULL AND gastos_consumo_anterior_2 IS NULL THEN 1
+				WHEN gastos_consumo_actual IS NULL AND gastos_consumo_anterior_1 IS NOT NULL AND gastos_consumo_anterior_2 IS NULL THEN 1 
+				WHEN gastos_consumo_actual IS NULL AND gastos_consumo_anterior_1 IS NULL AND gastos_consumo_anterior_2 IS NOT NULL THEN 1
+			END AS gastos_consumo_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_consumo_anterior_3 IS NOT NULL AND gastos_consumo_anterior_4 IS NOT NULL AND gastos_consumo_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_consumo_anterior_3 IS NULL AND gastos_consumo_anterior_4 IS NOT NULL AND gastos_consumo_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_consumo_anterior_3 IS NOT NULL AND gastos_consumo_anterior_4 IS  NULL AND gastos_consumo_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_consumo_anterior_3 IS NOT NULL AND gastos_consumo_anterior_4 IS NOT NULL AND gastos_consumo_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_consumo_anterior_3 IS NOT NULL AND gastos_consumo_anterior_4 IS NULL AND gastos_consumo_anterior_5 IS NULL THEN 1
+				WHEN gastos_consumo_anterior_3 IS NULL AND gastos_consumo_anterior_4 IS NOT NULL AND gastos_consumo_anterior_5 IS NULL THEN 1 
+				WHEN gastos_consumo_anterior_3 IS NULL AND gastos_consumo_anterior_4 IS NULL AND gastos_consumo_anterior_5 IS NOT NULL THEN 1
+			END AS gastos_consumo_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --12.INGRESOS DUROS--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_duros_actual IS NOT NULL AND ingresos_duros_anterior_1 IS NOT NULL AND ingresos_duros_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_duros_actual IS NULL AND ingresos_duros_anterior_1 IS NOT NULL AND ingresos_duros_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_duros_actual IS NOT NULL AND ingresos_duros_anterior_1 IS  NULL AND ingresos_duros_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_duros_actual IS NOT NULL AND ingresos_duros_anterior_1 IS NOT NULL AND ingresos_duros_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_duros_actual IS NOT NULL AND ingresos_duros_anterior_1 IS NULL AND ingresos_duros_anterior_2 IS NULL THEN 1
+				WHEN ingresos_duros_actual IS NULL AND ingresos_duros_anterior_1 IS NOT NULL AND ingresos_duros_anterior_2 IS NULL THEN 1 
+				WHEN ingresos_duros_actual IS NULL AND ingresos_duros_anterior_1 IS NULL AND ingresos_duros_anterior_2 IS NOT NULL THEN 1
+			END AS ingresos_duros_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_duros_anterior_3 IS NOT NULL AND ingresos_duros_anterior_4 IS NOT NULL AND ingresos_duros_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_duros_anterior_3 IS NULL AND ingresos_duros_anterior_4 IS NOT NULL AND ingresos_duros_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_duros_anterior_3 IS NOT NULL AND ingresos_duros_anterior_4 IS  NULL AND ingresos_duros_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_duros_anterior_3 IS NOT NULL AND ingresos_duros_anterior_4 IS NOT NULL AND ingresos_duros_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_duros_anterior_3 IS NOT NULL AND ingresos_duros_anterior_4 IS NULL AND ingresos_duros_anterior_5 IS NULL THEN 1
+				WHEN ingresos_duros_anterior_3 IS NULL AND ingresos_duros_anterior_4 IS NOT NULL AND ingresos_duros_anterior_5 IS NULL THEN 1 
+				WHEN ingresos_duros_anterior_3 IS NULL AND ingresos_duros_anterior_4 IS NULL AND ingresos_duros_anterior_5 IS NOT NULL THEN 1
+			END AS ingresos_duros_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --13.GASTOS AHORRO--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_ahorro_actual IS NOT NULL AND gastos_ahorro_anterior_1 IS NOT NULL AND gastos_ahorro_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_ahorro_actual IS NULL AND gastos_ahorro_anterior_1 IS NOT NULL AND gastos_ahorro_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_ahorro_actual IS NOT NULL AND gastos_ahorro_anterior_1 IS  NULL AND gastos_ahorro_anterior_2 IS NOT NULL THEN 2 
+				WHEN gastos_ahorro_actual IS NOT NULL AND gastos_ahorro_anterior_1 IS NOT NULL AND gastos_ahorro_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_ahorro_actual IS NOT NULL AND gastos_ahorro_anterior_1 IS NULL AND gastos_ahorro_anterior_2 IS NULL THEN 1
+				WHEN gastos_ahorro_actual IS NULL AND gastos_ahorro_anterior_1 IS NOT NULL AND gastos_ahorro_anterior_2 IS NULL THEN 1
+				WHEN gastos_ahorro_actual IS NULL AND gastos_ahorro_anterior_1 IS NULL AND gastos_ahorro_anterior_2 IS NOT NULL THEN 1
+			END AS gastos_ahorro_trim_actual_conteo,
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN gastos_ahorro_anterior_3 IS NOT NULL AND gastos_ahorro_anterior_4 IS NOT NULL AND gastos_ahorro_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN gastos_ahorro_anterior_3 IS NULL AND gastos_ahorro_anterior_4 IS NOT NULL AND gastos_ahorro_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_ahorro_anterior_3 IS NOT NULL AND gastos_ahorro_anterior_4 IS  NULL AND gastos_ahorro_anterior_5 IS NOT NULL THEN 2 
+				WHEN gastos_ahorro_anterior_3 IS NOT NULL AND gastos_ahorro_anterior_4 IS NOT NULL AND gastos_ahorro_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN gastos_ahorro_anterior_3 IS NOT NULL AND gastos_ahorro_anterior_4 IS NULL AND gastos_ahorro_anterior_5 IS NULL THEN 1
+				WHEN gastos_ahorro_anterior_3 IS NULL AND gastos_ahorro_anterior_4 IS NOT NULL AND gastos_ahorro_anterior_5 IS NULL THEN 1 
+				WHEN gastos_ahorro_anterior_3 IS NULL AND gastos_ahorro_anterior_4 IS NULL AND gastos_ahorro_anterior_5 IS NOT NULL THEN 1
+			END AS gastos_ahorro_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --14.INGRESOS AHORRO--
+                        CASE
+                                --TRES CASOS NOT NULL--
+				WHEN ingresos_ahorro_actual IS NOT NULL AND ingresos_ahorro_anterior_1 IS NOT NULL AND ingresos_ahorro_anterior_2 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_ahorro_actual IS NULL AND ingresos_ahorro_anterior_1 IS NOT NULL AND ingresos_ahorro_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_ahorro_actual IS NOT NULL AND ingresos_ahorro_anterior_1 IS  NULL AND ingresos_ahorro_anterior_2 IS NOT NULL THEN 2 
+				WHEN ingresos_ahorro_actual IS NOT NULL AND ingresos_ahorro_anterior_1 IS NOT NULL AND ingresos_ahorro_anterior_2 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_ahorro_actual IS NOT NULL AND ingresos_ahorro_anterior_1 IS NULL AND ingresos_ahorro_anterior_2 IS NULL THEN 1
+				WHEN ingresos_ahorro_actual IS NULL AND ingresos_ahorro_anterior_1 IS NOT NULL AND ingresos_ahorro_anterior_2 IS NULL THEN 1 
+				WHEN ingresos_ahorro_actual IS NULL AND ingresos_ahorro_anterior_1 IS NULL AND ingresos_ahorro_anterior_2 IS NOT NULL THEN 1
+			END AS ingresos_ahorro_trim_actual_conteo,
+                        CASE
+            	        --TRES CASOS NOT NULL--
+				WHEN ingresos_ahorro_anterior_3 IS NOT NULL AND ingresos_ahorro_anterior_4 IS NOT NULL AND ingresos_ahorro_anterior_5 IS NOT NULL THEN 3 
+				-- DOS CASOS NOT NULL--
+				WHEN ingresos_ahorro_anterior_3 IS NULL AND ingresos_ahorro_anterior_4 IS NOT NULL AND ingresos_ahorro_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_ahorro_anterior_3 IS NOT NULL AND ingresos_ahorro_anterior_4 IS  NULL AND ingresos_ahorro_anterior_5 IS NOT NULL THEN 2 
+				WHEN ingresos_ahorro_anterior_3 IS NOT NULL AND ingresos_ahorro_anterior_4 IS NOT NULL AND ingresos_ahorro_anterior_5 IS NULL THEN 2
+				-- UN CASO NULL--
+				WHEN ingresos_ahorro_anterior_3 IS NOT NULL AND ingresos_ahorro_anterior_4 IS NULL AND ingresos_ahorro_anterior_5 IS NULL THEN 1
+				WHEN ingresos_ahorro_anterior_3 IS NULL AND ingresos_ahorro_anterior_4 IS NOT NULL AND ingresos_ahorro_anterior_5 IS NULL THEN 1 
+				WHEN ingresos_ahorro_anterior_3 IS NULL AND ingresos_ahorro_anterior_4 IS NULL AND ingresos_ahorro_anterior_5 IS NOT NULL THEN 1
+			END AS ingresos_ahorro_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --15.CAPACIDAD AHORRO TOTAL--
+                        CASE
+                            --TRES CASOS NOT NULL--
+                            WHEN cap_ahorro_total_actual IS NOT NULL AND cap_ahorro_total_anterior_1 IS NOT NULL AND cap_ahorro_total_anterior_2 IS NOT NULL THEN 3 
+                            -- DOS CASOS NOT NULL--
+                            WHEN cap_ahorro_total_actual IS NULL AND cap_ahorro_total_anterior_1 IS NOT NULL AND cap_ahorro_total_anterior_2 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_total_actual IS NOT NULL AND cap_ahorro_total_anterior_1 IS  NULL AND cap_ahorro_total_anterior_2 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_total_actual IS NOT NULL AND cap_ahorro_total_anterior_1 IS NOT NULL AND cap_ahorro_total_anterior_2 IS NULL THEN 2
+                            -- UN CASO NULL--
+                            WHEN cap_ahorro_total_actual IS NOT NULL AND cap_ahorro_total_anterior_1 IS NULL AND cap_ahorro_total_anterior_2 IS NULL THEN 1
+                            WHEN cap_ahorro_total_actual IS NULL AND cap_ahorro_total_anterior_1 IS NOT NULL AND cap_ahorro_total_anterior_2 IS NULL THEN 1 
+                            WHEN cap_ahorro_total_actual IS NULL AND cap_ahorro_total_anterior_1 IS NULL AND cap_ahorro_total_anterior_2 IS NOT NULL THEN 1
+                        END AS cap_ahorro_total_trim_actual_conteo,
+                                    CASE
+                            --TRES CASOS NOT NULL--
+                            WHEN cap_ahorro_total_anterior_3 IS NOT NULL AND cap_ahorro_total_anterior_4 IS NOT NULL AND cap_ahorro_total_anterior_5 IS NOT NULL THEN 3 
+                            -- DOS CASOS NOT NULL--
+                            WHEN cap_ahorro_total_anterior_3 IS NULL AND cap_ahorro_total_anterior_4 IS NOT NULL AND cap_ahorro_total_anterior_5 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_total_anterior_3 IS NOT NULL AND cap_ahorro_total_anterior_4 IS  NULL AND cap_ahorro_total_anterior_5 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_total_anterior_3 IS NOT NULL AND cap_ahorro_total_anterior_4 IS NOT NULL AND cap_ahorro_total_anterior_5 IS NULL THEN 2
+                            -- UN CASO NULL--
+                            WHEN cap_ahorro_total_anterior_3 IS NOT NULL AND cap_ahorro_total_anterior_4 IS NULL AND cap_ahorro_total_anterior_5 IS NULL THEN 1
+                            WHEN cap_ahorro_total_anterior_3 IS NULL AND cap_ahorro_total_anterior_4 IS NOT NULL AND cap_ahorro_total_anterior_5 IS NULL THEN 1 
+                            WHEN cap_ahorro_total_anterior_3 IS NULL AND cap_ahorro_total_anterior_4 IS NULL AND cap_ahorro_total_anterior_5 IS NOT NULL THEN 1
+                        END AS cap_ahorro_total_trim_anterior_conteo,
+                          ---------------------------------------------------------------------------------------------------------------------------------
+                        --16.CAPACIDAD AHORRO DURA--
+                        CASE
+                            --TRES CASOS NOT NULL--
+                            WHEN cap_ahorro_dura_actual IS NOT NULL AND cap_ahorro_dura_anterior_1 IS NOT NULL AND cap_ahorro_dura_anterior_2 IS NOT NULL THEN 3 
+                            -- DOS CASOS NOT NULL--
+                            WHEN cap_ahorro_dura_actual IS NULL AND cap_ahorro_dura_anterior_1 IS NOT NULL AND cap_ahorro_dura_anterior_2 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_dura_actual IS NOT NULL AND cap_ahorro_dura_anterior_1 IS  NULL AND cap_ahorro_dura_anterior_2 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_dura_actual IS NOT NULL AND cap_ahorro_dura_anterior_1 IS NOT NULL AND cap_ahorro_dura_anterior_2 IS NULL THEN 2
+                            -- UN CASO NULL--
+                            WHEN cap_ahorro_dura_actual IS NOT NULL AND cap_ahorro_dura_anterior_1 IS NULL AND cap_ahorro_dura_anterior_2 IS NULL THEN 1
+                            WHEN cap_ahorro_dura_actual IS NULL AND cap_ahorro_dura_anterior_1 IS NOT NULL AND cap_ahorro_dura_anterior_2 IS NULL THEN 1 
+                            WHEN cap_ahorro_dura_actual IS NULL AND cap_ahorro_dura_anterior_1 IS NULL AND cap_ahorro_dura_anterior_2 IS NOT NULL THEN 1
+                        END AS cap_ahorro_dura_trim_actual_conteo,
+                                    CASE
+                            --TRES CASOS NOT NULL--
+                            WHEN cap_ahorro_dura_anterior_3 IS NOT NULL AND cap_ahorro_dura_anterior_4 IS NOT NULL AND cap_ahorro_dura_anterior_5 IS NOT NULL THEN 3 
+                            -- DOS CASOS NOT NULL--
+                            WHEN cap_ahorro_dura_anterior_3 IS NULL AND cap_ahorro_dura_anterior_4 IS NOT NULL AND cap_ahorro_dura_anterior_5 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_dura_anterior_3 IS NOT NULL AND cap_ahorro_dura_anterior_4 IS  NULL AND cap_ahorro_dura_anterior_5 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_dura_anterior_3 IS NOT NULL AND cap_ahorro_dura_anterior_4 IS NOT NULL AND cap_ahorro_dura_anterior_5 IS NULL THEN 2
+                            -- UN CASO NULL--
+                            WHEN cap_ahorro_dura_anterior_3 IS NOT NULL AND cap_ahorro_dura_anterior_4 IS NULL AND cap_ahorro_dura_anterior_5 IS NULL THEN 1
+                            WHEN cap_ahorro_dura_anterior_3 IS NULL AND cap_ahorro_dura_anterior_4 IS NOT NULL AND cap_ahorro_dura_anterior_5 IS NULL THEN 1 
+                            WHEN cap_ahorro_dura_anterior_3 IS NULL AND cap_ahorro_dura_anterior_4 IS NULL AND cap_ahorro_dura_anterior_5 IS NOT NULL THEN 1
+                        END AS cap_ahorro_dura_trim_anterior_conteo,
+                        ---------------------------------------------------------------------------------------------------------------------------------
+                        --17.CAPACIDAD AHORRO AUMENTADA--
+                        CASE
+                            --TRES CASOS NOT NULL--
+                            WHEN cap_ahorro_aumentada_actual IS NOT NULL AND cap_ahorro_aumentada_anterior_1 IS NOT NULL AND cap_ahorro_aumentada_anterior_2 IS NOT NULL THEN 3 
+                            -- DOS CASOS NOT NULL--
+                            WHEN cap_ahorro_aumentada_actual IS NULL AND cap_ahorro_aumentada_anterior_1 IS NOT NULL AND cap_ahorro_aumentada_anterior_2 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_aumentada_actual IS NOT NULL AND cap_ahorro_aumentada_anterior_1 IS  NULL AND cap_ahorro_aumentada_anterior_2 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_aumentada_actual IS NOT NULL AND cap_ahorro_aumentada_anterior_1 IS NOT NULL AND cap_ahorro_aumentada_anterior_2 IS NULL THEN 2
+                            -- UN CASO NULL--
+                            WHEN cap_ahorro_aumentada_actual IS NOT NULL AND cap_ahorro_aumentada_anterior_1 IS NULL AND cap_ahorro_aumentada_anterior_2 IS NULL THEN 1
+                            WHEN cap_ahorro_aumentada_actual IS NULL AND cap_ahorro_aumentada_anterior_1 IS NOT NULL AND cap_ahorro_aumentada_anterior_2 IS NULL THEN 1 
+                            WHEN cap_ahorro_aumentada_actual IS NULL AND cap_ahorro_aumentada_anterior_1 IS NULL AND cap_ahorro_aumentada_anterior_2 IS NOT NULL THEN 1
+                        END AS cap_ahorro_aumentada_trim_actual_conteo,
+                                    CASE
+                            --TRES CASOS NOT NULL--
+                            WHEN cap_ahorro_aumentada_anterior_3 IS NOT NULL AND cap_ahorro_aumentada_anterior_4 IS NOT NULL AND cap_ahorro_aumentada_anterior_5 IS NOT NULL THEN 3 
+                            -- DOS CASOS NOT NULL--
+                            WHEN cap_ahorro_aumentada_anterior_3 IS NULL AND cap_ahorro_aumentada_anterior_4 IS NOT NULL AND cap_ahorro_aumentada_anterior_5 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_aumentada_anterior_3 IS NOT NULL AND cap_ahorro_aumentada_anterior_4 IS  NULL AND cap_ahorro_aumentada_anterior_5 IS NOT NULL THEN 2 
+                            WHEN cap_ahorro_aumentada_anterior_3 IS NOT NULL AND cap_ahorro_aumentada_anterior_4 IS NOT NULL AND cap_ahorro_aumentada_anterior_5 IS NULL THEN 2
+                            -- UN CASO NULL--
+                            WHEN cap_ahorro_aumentada_anterior_3 IS NOT NULL AND cap_ahorro_aumentada_anterior_4 IS NULL AND cap_ahorro_aumentada_anterior_5 IS NULL THEN 1
+                            WHEN cap_ahorro_aumentada_anterior_3 IS NULL AND cap_ahorro_aumentada_anterior_4 IS NOT NULL AND cap_ahorro_aumentada_anterior_5 IS NULL THEN 1 
+                            WHEN cap_ahorro_aumentada_anterior_3 IS NULL AND cap_ahorro_aumentada_anterior_4 IS NULL AND cap_ahorro_aumentada_anterior_5 IS NOT NULL THEN 1
+                        END AS cap_ahorro_aumentada_trim_anterior_conteo
+                FROM sb_gf.tabla_movimientos_indicadores_01_{fec_info_input}
+                ''')
+
+spark.sql(f'DROP VIEW IF EXISTS sb_gf.tabla_movimientos_indicadores_03_{fec_info_input}')
+spark.sql(f'''CREATE VIEW sb_gf.tabla_movimientos_indicadores_03_{fec_info_input} AS
+            SELECT 
+                a.fec_info,
+                a.buc_cliente,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --1. INGRESOS TOTALES--
+                a.ingreso_total_actual,
+                CASE WHEN b.ingreso_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.ingreso_total_actual,0) + COALESCE(a.ingreso_total_anterior_1,0)+ COALESCE(a.ingreso_total_anterior_2,0) ELSE NULL END AS ingreso_trim_actual,
+                b.ingreso_trim_actual_conteo,
+                CASE 
+                        WHEN b.ingreso_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingreso_total_actual,0) + COALESCE(a.ingreso_total_anterior_1,0)+ COALESCE(a.ingreso_total_anterior_2,0))/b.ingreso_trim_actual_conteo ELSE NULL 
+                END AS ingreso_promedio_trim_actual,
+                CASE WHEN b.ingreso_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.ingreso_total_anterior_3,0) + COALESCE(a.ingreso_total_anterior_4,0)+ COALESCE(a.ingreso_total_anterior_5,0) ELSE NULL END AS ingreso_trim_anterior,
+                b.ingreso_trim_anterior_conteo,
+                CASE 
+                        WHEN b.ingreso_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingreso_total_anterior_3,0) + COALESCE(a.ingreso_total_anterior_4,0)+ COALESCE(a.ingreso_total_anterior_5,0))/b.ingreso_trim_anterior_conteo ELSE NULL 
+                END AS ingreso_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --2.GASTOS TOTALES--
+                a.gasto_total_actual,
+                CASE WHEN b.gasto_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.gasto_total_actual,0) + COALESCE(a.gasto_total_anterior_1,0)+ COALESCE(a.gasto_total_anterior_2,0) ELSE NULL END AS gasto_trim_actual,
+                b.gasto_trim_actual_conteo,
+                CASE 
+                        WHEN b.gasto_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gasto_total_actual,0) + COALESCE(a.gasto_total_anterior_1,0)+ COALESCE(a.gasto_total_anterior_2,0))/b.gasto_trim_actual_conteo ELSE NULL 
+                END AS gasto_promedio_trim_actual,
+                CASE WHEN b.gasto_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.gasto_total_anterior_3,0) + COALESCE(a.gasto_total_anterior_4,0)+ COALESCE(a.gasto_total_anterior_5,0) ELSE NULL END AS gasto_trim_anterior,
+                b.gasto_trim_anterior_conteo,
+                CASE 
+                        WHEN b.gasto_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gasto_total_anterior_3,0) + COALESCE(a.gasto_total_anterior_4,0)+ COALESCE(a.gasto_total_anterior_5,0))/b.gasto_trim_anterior_conteo ELSE NULL 
+                END AS gasto_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --3.GASTOS BLANDOS--
+                a.gastos_blandos_actual,
+                CASE WHEN b.gastos_blandos_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.gastos_blandos_actual,0) + COALESCE(a.gastos_blandos_anterior_1,0)+ COALESCE(a.gastos_blandos_anterior_2,0) ELSE NULL END AS gastos_blandos_trim_actual,
+                b.gastos_blandos_trim_actual_conteo,
+                CASE 
+                        WHEN b.gastos_blandos_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_blandos_actual,0) + COALESCE(a.gastos_blandos_anterior_1,0)+ COALESCE(a.gastos_blandos_anterior_2,0))/b.gastos_blandos_trim_actual_conteo ELSE NULL 
+                END AS gastos_blandos_promedio_trim_actual,
+                CASE WHEN b.gastos_blandos_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.gastos_blandos_anterior_3,0) + COALESCE(a.gastos_blandos_anterior_4,0)+ COALESCE(a.gastos_blandos_anterior_5,0) ELSE NULL END AS gastos_blandos_trim_anterior,
+                b.gastos_blandos_trim_anterior_conteo,
+                CASE 
+                        WHEN b.gastos_blandos_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_blandos_anterior_3,0) + COALESCE(a.gastos_blandos_anterior_4,0)+ COALESCE(a.gastos_blandos_anterior_5,0))/b.gastos_blandos_trim_anterior_conteo ELSE NULL 
+                END AS gastos_blandos_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --4.INGRESOS BLANDOS--
+                a.ingresos_blandos_actual,
+                CASE WHEN b.ingresos_blandos_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.ingresos_blandos_actual,0) + COALESCE(a.ingresos_blandos_anterior_1,0)+ COALESCE(a.ingresos_blandos_anterior_2,0) ELSE NULL END AS ingresos_blandos_trim_actual,
+                b.ingresos_blandos_trim_actual_conteo,
+                CASE 
+                        WHEN b.ingresos_blandos_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_blandos_actual,0) + COALESCE(a.ingresos_blandos_anterior_1,0)+ COALESCE(a.ingresos_blandos_anterior_2,0))/b.ingresos_blandos_trim_actual_conteo ELSE NULL 
+                END AS ingresos_blandos_promedio_trim_actual,
+                CASE WHEN b.ingresos_blandos_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.ingresos_blandos_anterior_3,0) + COALESCE(a.ingresos_blandos_anterior_4,0)+ COALESCE(a.ingresos_blandos_anterior_5,0) ELSE NULL END AS ingresos_blandos_trim_anterior,
+                b.ingresos_blandos_trim_anterior_conteo,
+                CASE 
+                        WHEN b.ingresos_blandos_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_blandos_anterior_3,0) + COALESCE(a.ingresos_blandos_anterior_4,0)+ COALESCE(a.ingresos_blandos_anterior_5,0))/b.ingresos_blandos_trim_anterior_conteo ELSE NULL 
+                END AS ingresos_blandos_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --5.GASTOS TRANSFERENCIA--
+                a.gastos_transferencia_actual,
+                CASE WHEN b.gastos_transferencia_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.gastos_transferencia_actual,0) + COALESCE(a.gastos_transferencia_anterior_1,0)+ COALESCE(a.gastos_transferencia_anterior_2,0) ELSE NULL END AS gastos_transferencia_trim_actual,
+                b.gastos_transferencia_trim_actual_conteo,
+                CASE 
+                        WHEN b.gastos_transferencia_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_transferencia_actual,0) + COALESCE(a.gastos_transferencia_anterior_1,0)+ COALESCE(a.gastos_transferencia_anterior_2,0))/b.gastos_transferencia_trim_actual_conteo ELSE NULL 
+                END AS gastos_transferencia_promedio_trim_actual,
+                CASE WHEN b.gastos_transferencia_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.gastos_transferencia_anterior_3,0) + COALESCE(a.gastos_transferencia_anterior_4,0)+ COALESCE(a.gastos_transferencia_anterior_5,0) ELSE NULL END AS gastos_transferencia_trim_anterior,
+                b.gastos_transferencia_trim_anterior_conteo,
+                CASE 
+                        WHEN b.gastos_transferencia_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_transferencia_anterior_3,0) + COALESCE(a.gastos_transferencia_anterior_4,0)+ COALESCE(a.gastos_transferencia_anterior_5,0))/b.gastos_transferencia_trim_anterior_conteo ELSE NULL 
+                END AS gastos_transferencia_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --6.INGRESOS TRANSFERENCIA--
+                a.ingresos_transferencia_actual,
+                CASE WHEN b.ingresos_transferencia_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.ingresos_transferencia_actual,0) + COALESCE(a.ingresos_transferencia_anterior_1,0)+ COALESCE(a.ingresos_transferencia_anterior_2,0) ELSE NULL END AS ingresos_transferencia_trim_actual,
+                b.ingresos_transferencia_trim_actual_conteo,
+                CASE 
+                        WHEN b.ingresos_transferencia_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_transferencia_actual,0) + COALESCE(a.ingresos_transferencia_anterior_1,0)+ COALESCE(a.ingresos_transferencia_anterior_2,0))/b.ingresos_transferencia_trim_actual_conteo ELSE NULL 
+                END AS ingresos_transferencia_promedio_trim_actual,
+                CASE WHEN b.ingresos_transferencia_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.ingresos_transferencia_anterior_3,0) + COALESCE(a.ingresos_transferencia_anterior_4,0)+ COALESCE(a.ingresos_transferencia_anterior_5,0) ELSE NULL END AS ingresos_transferencia_trim_anterior,
+                b.ingresos_transferencia_trim_anterior_conteo,
+                CASE 
+                        WHEN b.ingresos_transferencia_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_transferencia_anterior_3,0) + COALESCE(a.ingresos_transferencia_anterior_4,0)+ COALESCE(a.ingresos_transferencia_anterior_5,0))/b.ingresos_transferencia_trim_anterior_conteo ELSE NULL 
+                END AS ingresos_transferencia_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --7.GASTOS EFECTIVO--
+                a.gastos_efectivo_actual,
+                CASE WHEN b.gastos_efectivo_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.gastos_efectivo_actual,0) + COALESCE(a.gastos_efectivo_anterior_1,0)+ COALESCE(a.gastos_efectivo_anterior_2,0) ELSE NULL END AS gastos_efectivo_trim_actual,
+                b.gastos_efectivo_trim_actual_conteo,
+                CASE 
+                        WHEN b.gastos_efectivo_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_efectivo_actual,0) + COALESCE(a.gastos_efectivo_anterior_1,0)+ COALESCE(a.gastos_efectivo_anterior_2,0))/b.gastos_efectivo_trim_actual_conteo ELSE NULL 
+                END AS gastos_efectivo_promedio_trim_actual,
+                CASE WHEN b.gastos_efectivo_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.gastos_efectivo_anterior_3,0) + COALESCE(a.gastos_efectivo_anterior_4,0)+ COALESCE(a.gastos_efectivo_anterior_5,0) ELSE NULL END AS gastos_efectivo_trim_anterior,
+                b.gastos_efectivo_trim_anterior_conteo,
+                CASE 
+                        WHEN b.gastos_efectivo_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_efectivo_anterior_3,0) + COALESCE(a.gastos_efectivo_anterior_4,0)+ COALESCE(a.gastos_efectivo_anterior_5,0))/b.gastos_efectivo_trim_anterior_conteo ELSE NULL 
+                END AS gastos_efectivo_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --8.INGRESOS EFECTIVO--
+                a.ingresos_efectivo_actual,
+                CASE WHEN b.ingresos_efectivo_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.ingresos_efectivo_actual,0) + COALESCE(a.ingresos_efectivo_anterior_1,0)+ COALESCE(a.ingresos_efectivo_anterior_2,0) ELSE NULL END AS ingresos_efectivo_trim_actual,
+                b.ingresos_efectivo_trim_actual_conteo,
+                CASE 
+                        WHEN b.ingresos_efectivo_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_efectivo_actual,0) + COALESCE(a.ingresos_efectivo_anterior_1,0)+ COALESCE(a.ingresos_efectivo_anterior_2,0))/b.ingresos_efectivo_trim_actual_conteo ELSE NULL 
+                END AS ingresos_efectivo_promedio_trim_actual,
+                CASE WHEN b.ingresos_efectivo_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.ingresos_efectivo_anterior_3,0) + COALESCE(a.ingresos_efectivo_anterior_4,0)+ COALESCE(a.ingresos_efectivo_anterior_5,0) ELSE NULL END AS ingresos_efectivo_trim_anterior,
+                b.ingresos_efectivo_trim_anterior_conteo,
+                CASE 
+                        WHEN b.ingresos_efectivo_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_efectivo_anterior_3,0) + COALESCE(a.ingresos_efectivo_anterior_4,0)+ COALESCE(a.ingresos_efectivo_anterior_5,0))/b.ingresos_efectivo_trim_anterior_conteo ELSE NULL 
+                END AS ingresos_efectivo_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --9.GASTOS FINANCIEROS--
+                a.gastos_financieros_actual,
+                CASE WHEN b.gastos_financieros_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.gastos_financieros_actual,0) + COALESCE(a.gastos_financieros_anterior_1,0)+ COALESCE(a.gastos_financieros_anterior_2,0) ELSE NULL END AS gastos_financieros_trim_actual,
+                b.gastos_financieros_trim_actual_conteo,
+                CASE 
+                        WHEN b.gastos_financieros_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_financieros_actual,0) + COALESCE(a.gastos_financieros_anterior_1,0)+ COALESCE(a.gastos_financieros_anterior_2,0))/b.gastos_financieros_trim_actual_conteo ELSE NULL 
+                END AS gastos_financieros_promedio_trim_actual,
+                CASE WHEN b.gastos_financieros_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.gastos_financieros_anterior_3,0) + COALESCE(a.gastos_financieros_anterior_4,0)+ COALESCE(a.gastos_financieros_anterior_5,0) ELSE NULL END AS gastos_financieros_trim_anterior,
+                b.gastos_financieros_trim_anterior_conteo,
+                CASE 
+                        WHEN b.gastos_financieros_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_financieros_anterior_3,0) + COALESCE(a.gastos_financieros_anterior_4,0)+ COALESCE(a.gastos_financieros_anterior_5,0))/b.gastos_financieros_trim_anterior_conteo ELSE NULL 
+                END AS gastos_financieros_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --10.INGRESOS FINANCIEROS--
+                a.ingresos_financieros_actual,
+                CASE WHEN b.ingresos_financieros_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.ingresos_financieros_actual,0) + COALESCE(a.ingresos_financieros_anterior_1,0)+ COALESCE(a.ingresos_financieros_anterior_2,0) ELSE NULL END AS ingresos_financieros_trim_actual,
+                b.ingresos_financieros_trim_actual_conteo,
+                CASE 
+                        WHEN b.ingresos_financieros_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_financieros_actual,0) + COALESCE(a.ingresos_financieros_anterior_1,0)+ COALESCE(a.ingresos_financieros_anterior_2,0))/b.ingresos_financieros_trim_actual_conteo ELSE NULL 
+                END AS ingresos_financieros_promedio_trim_actual,
+                CASE WHEN b.ingresos_financieros_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.ingresos_financieros_anterior_3,0) + COALESCE(a.ingresos_financieros_anterior_4,0)+ COALESCE(a.ingresos_financieros_anterior_5,0) ELSE NULL END AS ingresos_financieros_trim_anterior,
+                b.ingresos_financieros_trim_anterior_conteo,
+                CASE 
+                        WHEN b.ingresos_financieros_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_financieros_anterior_3,0) + COALESCE(a.ingresos_financieros_anterior_4,0)+ COALESCE(a.ingresos_financieros_anterior_5,0))/b.ingresos_financieros_trim_anterior_conteo ELSE NULL 
+                END AS ingresos_financieros_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --11.GASTOS CONSUMO--
+                a.gastos_consumo_actual,
+                CASE WHEN b.gastos_consumo_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.gastos_consumo_actual,0) + COALESCE(a.gastos_consumo_anterior_1,0)+ COALESCE(a.gastos_consumo_anterior_2,0) ELSE NULL END AS gastos_consumo_trim_actual,
+                b.gastos_consumo_trim_actual_conteo,
+                CASE 
+                        WHEN b.gastos_consumo_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_consumo_actual,0) + COALESCE(a.gastos_consumo_anterior_1,0)+ COALESCE(a.gastos_consumo_anterior_2,0))/b.gastos_consumo_trim_actual_conteo ELSE NULL 
+                END AS gastos_consumo_promedio_trim_actual,
+                CASE WHEN b.gastos_consumo_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.gastos_consumo_anterior_3,0) + COALESCE(a.gastos_consumo_anterior_4,0)+ COALESCE(a.gastos_consumo_anterior_5,0) ELSE NULL END AS gastos_consumo_trim_anterior,
+                b.gastos_consumo_trim_anterior_conteo,
+                CASE 
+                        WHEN b.gastos_consumo_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_consumo_anterior_3,0) + COALESCE(a.gastos_consumo_anterior_4,0)+ COALESCE(a.gastos_consumo_anterior_5,0))/b.gastos_consumo_trim_anterior_conteo ELSE NULL 
+                END AS gastos_consumo_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --12.INGRESOS DUROS--
+                a.ingresos_duros_actual,
+                CASE WHEN b.ingresos_duros_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.ingresos_duros_actual,0) + COALESCE(a.ingresos_duros_anterior_1,0)+ COALESCE(a.ingresos_duros_anterior_2,0) ELSE NULL END AS ingresos_duros_trim_actual,
+                b.ingresos_duros_trim_actual_conteo,
+                CASE 
+                        WHEN b.ingresos_duros_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_duros_actual,0) + COALESCE(a.ingresos_duros_anterior_1,0)+ COALESCE(a.ingresos_duros_anterior_2,0))/b.ingresos_duros_trim_actual_conteo ELSE NULL 
+                END AS ingresos_duros_promedio_trim_actual,
+                CASE WHEN b.ingresos_duros_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.ingresos_duros_anterior_3,0) + COALESCE(a.ingresos_duros_anterior_4,0)+ COALESCE(a.ingresos_duros_anterior_5,0) ELSE NULL END AS ingresos_duros_trim_anterior,
+                b.ingresos_duros_trim_anterior_conteo,
+                CASE 
+                        WHEN b.ingresos_duros_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_duros_anterior_3,0) + COALESCE(a.ingresos_duros_anterior_4,0)+ COALESCE(a.ingresos_duros_anterior_5,0))/b.ingresos_duros_trim_anterior_conteo ELSE NULL 
+                END AS ingresos_duros_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --13.GASTOS AHORRO--
+                a.gastos_ahorro_actual,
+                CASE WHEN b.gastos_ahorro_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.gastos_ahorro_actual,0) + COALESCE(a.gastos_ahorro_anterior_1,0)+ COALESCE(a.gastos_ahorro_anterior_2,0) ELSE NULL END AS gastos_ahorro_trim_actual,
+                b.gastos_ahorro_trim_actual_conteo,
+                CASE 
+                        WHEN b.gastos_ahorro_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_ahorro_actual,0) + COALESCE(a.gastos_ahorro_anterior_1,0)+ COALESCE(a.gastos_ahorro_anterior_2,0))/b.gastos_ahorro_trim_actual_conteo ELSE NULL 
+                END AS gastos_ahorro_promedio_trim_actual,
+                CASE WHEN b.gastos_ahorro_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.gastos_ahorro_anterior_3,0) + COALESCE(a.gastos_ahorro_anterior_4,0)+ COALESCE(a.gastos_ahorro_anterior_5,0) ELSE NULL END AS gastos_ahorro_trim_anterior,
+                b.gastos_ahorro_trim_anterior_conteo,
+                CASE 
+                        WHEN b.gastos_ahorro_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.gastos_ahorro_anterior_3,0) + COALESCE(a.gastos_ahorro_anterior_4,0)+ COALESCE(a.gastos_ahorro_anterior_5,0))/b.gastos_ahorro_trim_anterior_conteo ELSE NULL 
+                END AS gastos_ahorro_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --14.INGRESOS AHORRO--
+                a.ingresos_ahorro_actual,
+                CASE WHEN b.ingresos_ahorro_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.ingresos_ahorro_actual,0) + COALESCE(a.ingresos_ahorro_anterior_1,0)+ COALESCE(a.ingresos_ahorro_anterior_2,0) ELSE NULL END AS ingresos_ahorro_trim_actual,
+                b.ingresos_ahorro_trim_actual_conteo,
+                CASE 
+                        WHEN b.ingresos_ahorro_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_ahorro_actual,0) + COALESCE(a.ingresos_ahorro_anterior_1,0)+ COALESCE(a.ingresos_ahorro_anterior_2,0))/b.ingresos_ahorro_trim_actual_conteo ELSE NULL 
+                END AS ingresos_ahorro_promedio_trim_actual,
+                CASE WHEN b.ingresos_ahorro_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.ingresos_ahorro_anterior_3,0) + COALESCE(a.ingresos_ahorro_anterior_4,0)+ COALESCE(a.ingresos_ahorro_anterior_5,0) ELSE NULL END AS ingresos_ahorro_trim_anterior,
+                b.ingresos_ahorro_trim_anterior_conteo,
+                CASE 
+                        WHEN b.ingresos_ahorro_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.ingresos_ahorro_anterior_3,0) + COALESCE(a.ingresos_ahorro_anterior_4,0)+ COALESCE(a.ingresos_ahorro_anterior_5,0))/b.ingresos_ahorro_trim_anterior_conteo ELSE NULL 
+                END AS ingresos_ahorro_promedio_trim_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --15. CAPACIDAD AHORRO TOTAL--
+                a.cap_ahorro_total_actual,
+                CASE WHEN b.cap_ahorro_total_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.cap_ahorro_total_actual,0) + COALESCE(a.cap_ahorro_total_anterior_1,0)+ COALESCE(a.cap_ahorro_total_anterior_2,0) ELSE NULL END AS cap_ahorro_total_trim_actual,
+                b.cap_ahorro_total_trim_actual_conteo,
+                CASE 
+                        WHEN b.cap_ahorro_total_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.cap_ahorro_total_actual,0) + COALESCE(a.cap_ahorro_total_anterior_1,0)+ COALESCE(a.cap_ahorro_total_anterior_2,0))/b.cap_ahorro_total_trim_actual_conteo ELSE NULL 
+                END AS cap_ahorro_total_promedio_trim_actual,
+                CASE WHEN b.cap_ahorro_total_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.cap_ahorro_total_anterior_3,0) + COALESCE(a.cap_ahorro_total_anterior_4,0)+ COALESCE(a.cap_ahorro_total_anterior_5,0) ELSE NULL END AS cap_ahorro_total_trim_anterior,
+                b.cap_ahorro_total_trim_anterior_conteo,
+                CASE 
+                        WHEN b.cap_ahorro_total_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.cap_ahorro_total_anterior_3,0) + COALESCE(a.cap_ahorro_total_anterior_4,0)+ COALESCE(a.cap_ahorro_total_anterior_5,0))/b.cap_ahorro_total_trim_anterior_conteo ELSE NULL 
+                END AS cap_ahorro_total_promedio_trim_anterior,
+                ----------------------------------------------------------------------------------------
+                --16. CAPACIDAD AHORRO DURA--
+                a.cap_ahorro_dura_actual,
+                CASE WHEN b.cap_ahorro_dura_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.cap_ahorro_dura_actual,0) + COALESCE(a.cap_ahorro_dura_anterior_1,0)+ COALESCE(a.cap_ahorro_dura_anterior_2,0) ELSE NULL END AS cap_ahorro_dura_trim_actual,
+                b.cap_ahorro_dura_trim_actual_conteo,
+                CASE 
+                        WHEN b.cap_ahorro_dura_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.cap_ahorro_dura_actual,0) + COALESCE(a.cap_ahorro_dura_anterior_1,0)+ COALESCE(a.cap_ahorro_dura_anterior_2,0))/b.cap_ahorro_dura_trim_actual_conteo ELSE NULL 
+                END AS cap_ahorro_dura_promedio_trim_actual,
+                CASE WHEN b.cap_ahorro_dura_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.cap_ahorro_dura_anterior_3,0) + COALESCE(a.cap_ahorro_dura_anterior_4,0)+ COALESCE(a.cap_ahorro_dura_anterior_5,0) ELSE NULL END AS cap_ahorro_dura_trim_anterior,
+                b.cap_ahorro_dura_trim_anterior_conteo,
+                CASE 
+                        WHEN b.cap_ahorro_dura_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.cap_ahorro_dura_anterior_3,0) + COALESCE(a.cap_ahorro_dura_anterior_4,0)+ COALESCE(a.cap_ahorro_dura_anterior_5,0))/b.cap_ahorro_dura_trim_anterior_conteo ELSE NULL 
+                END AS cap_ahorro_dura_promedio_trim_anterior,
+                ----------------------------------------------------------------------------------------
+                --17. CAPACIDAD AHORRO AUMENTADA--
+                a.cap_ahorro_aumentada_actual,
+                CASE WHEN b.cap_ahorro_aumentada_trim_actual_conteo IS NOT NULL THEN 
+                        COALESCE(a.cap_ahorro_aumentada_actual,0) + COALESCE(a.cap_ahorro_aumentada_anterior_1,0)+ COALESCE(a.cap_ahorro_aumentada_anterior_2,0) ELSE NULL END AS cap_ahorro_aumentada_trim_actual,
+                b.cap_ahorro_aumentada_trim_actual_conteo,
+                CASE 
+                        WHEN b.cap_ahorro_aumentada_trim_actual_conteo IS NOT NULL THEN 
+                        (COALESCE(a.cap_ahorro_aumentada_actual,0) + COALESCE(a.cap_ahorro_aumentada_anterior_1,0)+ COALESCE(a.cap_ahorro_aumentada_anterior_2,0))/b.cap_ahorro_aumentada_trim_actual_conteo ELSE NULL 
+                END AS cap_ahorro_aumentada_promedio_trim_actual,
+                CASE WHEN b.cap_ahorro_aumentada_trim_anterior_conteo IS NOT NULL THEN
+                        COALESCE(a.cap_ahorro_aumentada_anterior_3,0) + COALESCE(a.cap_ahorro_aumentada_anterior_4,0)+ COALESCE(a.cap_ahorro_aumentada_anterior_5,0) ELSE NULL END AS cap_ahorro_aumentada_trim_anterior,
+                b.cap_ahorro_aumentada_trim_anterior_conteo,
+                CASE 
+                        WHEN b.cap_ahorro_aumentada_trim_anterior_conteo IS NOT NULL THEN 
+                        (COALESCE(a.cap_ahorro_aumentada_anterior_3,0) + COALESCE(a.cap_ahorro_aumentada_anterior_4,0)+ COALESCE(a.cap_ahorro_aumentada_anterior_5,0))/b.cap_ahorro_aumentada_trim_anterior_conteo ELSE NULL 
+                END AS cap_ahorro_aumentada_promedio_trim_anterior
+            FROM 
+                sb_gf.tabla_movimientos_indicadores_01_{fec_info_input} a
+            LEFT JOIN 
+                sb_gf.tabla_movimientos_indicadores_02_{fec_info_input} b
+            ON a.fec_info = b.fec_info  AND a.buc_cliente =b.buc_cliente
+                ORDER BY a.fec_info DESC
+          ''')
+
+spark.sql(f'''DROP TABLE IF EXISTS sb_gf.tabla_movimientos_indicadores_04_{fec_info_input}''')
+spark.sql(f'''CREATE TABLE sb_gf.tabla_movimientos_indicadores_04_{fec_info_input} AS
+                SELECT
+                fec_info,
+                buc_cliente,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 1.INGRESOS TOTALES -- 
+                ingreso_total_actual,
+                ingreso_promedio_trim_actual,
+                ingreso_promedio_trim_anterior,
+                CASE WHEN ingreso_promedio_trim_actual IS NOT NULL AND ingreso_promedio_trim_actual!=0 
+                        THEN ingreso_total_actual/ingreso_promedio_trim_actual - 1 ELSE NULL END AS var_ingreso_mes_actual_trim_anterior,
+                CASE WHEN ingreso_promedio_trim_anterior IS NOT NULL AND ingreso_promedio_trim_anterior!=0 
+                        THEN ingreso_promedio_trim_actual/ingreso_promedio_trim_anterior - 1 ELSE NULL END AS var_ingreso_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 2.GASTOS TOTALES --
+                gasto_total_actual,
+                gasto_promedio_trim_actual, 
+                gasto_promedio_trim_anterior,
+                CASE WHEN gasto_promedio_trim_actual IS NOT NULL AND gasto_promedio_trim_actual!=0 
+                        THEN gasto_total_actual/gasto_promedio_trim_actual - 1 ELSE NULL END AS var_gasto_mes_actual_trim_anterior,
+                CASE WHEN gasto_promedio_trim_anterior IS NOT NULL AND gasto_promedio_trim_actual!=0 
+                        THEN gasto_promedio_trim_actual/gasto_promedio_trim_anterior - 1 ELSE NULL END AS var_gasto_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 3.GASTOS BLANDOS --
+                gastos_blandos_actual,
+                gastos_blandos_promedio_trim_actual,
+                gastos_blandos_promedio_trim_anterior,
+                CASE WHEN gastos_blandos_promedio_trim_actual IS NOT NULL AND gastos_blandos_promedio_trim_actual!=0 
+                        THEN gastos_blandos_actual/gastos_blandos_promedio_trim_actual - 1 ELSE NULL END AS var_gastos_blandos_mes_actual_trim_anterior,
+                CASE WHEN gastos_blandos_promedio_trim_anterior IS NOT NULL AND gastos_blandos_promedio_trim_anterior!=0 
+                        THEN gastos_blandos_promedio_trim_actual/gastos_blandos_promedio_trim_anterior - 1 ELSE NULL END AS var_gastos_blandos_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --4.INGRESOS BLANDOS--
+                ingresos_blandos_actual,
+                ingresos_blandos_promedio_trim_actual, 
+                ingresos_blandos_promedio_trim_anterior,
+                CASE WHEN ingresos_blandos_promedio_trim_actual IS NOT NULL AND ingresos_blandos_promedio_trim_actual!=0 
+                        THEN ingresos_blandos_actual/ingresos_blandos_promedio_trim_actual - 1 ELSE NULL END AS var_ingresos_blandos_mes_actual_trim_anterior,
+                CASE WHEN ingresos_blandos_promedio_trim_anterior IS NOT NULL AND ingresos_blandos_promedio_trim_anterior!=0 
+                        THEN ingresos_blandos_promedio_trim_actual/ingresos_blandos_promedio_trim_anterior - 1 ELSE NULL END AS var_ingresos_blandos_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --5.GASTOS TRANSFERENCIA--
+                gastos_transferencia_actual,
+                gastos_transferencia_promedio_trim_actual, 
+                gastos_transferencia_promedio_trim_anterior,
+                CASE WHEN gastos_transferencia_promedio_trim_actual IS NOT NULL AND gastos_transferencia_promedio_trim_actual!=0 
+                        THEN gastos_transferencia_actual/gastos_transferencia_promedio_trim_actual - 1 ELSE NULL END AS var_gastos_transferencia_mes_actual_trim_anterior,
+                CASE WHEN gastos_transferencia_promedio_trim_anterior IS NOT NULL AND gastos_transferencia_promedio_trim_anterior!=0 
+                        THEN gastos_transferencia_promedio_trim_actual/gastos_transferencia_promedio_trim_anterior - 1 ELSE NULL END AS var_gastos_transferencia_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --6.INGRESOS TRANSFERENCIA--
+                ingresos_transferencia_actual,
+                ingresos_transferencia_promedio_trim_actual, 
+                ingresos_transferencia_promedio_trim_anterior,
+                CASE WHEN ingresos_transferencia_promedio_trim_actual IS NOT NULL AND ingresos_transferencia_promedio_trim_actual!=0 
+                        THEN ingresos_transferencia_actual/ingresos_transferencia_promedio_trim_actual - 1 ELSE NULL END AS var_ingresos_transferencia_mes_actual_trim_anterior,
+                CASE WHEN ingresos_transferencia_promedio_trim_anterior IS NOT NULL AND ingresos_transferencia_promedio_trim_anterior!=0 
+                        THEN ingresos_transferencia_promedio_trim_actual/ingresos_transferencia_promedio_trim_anterior - 1 ELSE NULL END AS var_ingresos_transferencia_trim_actual_anterior,	
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --7.GASTOS EFECTIVO--
+                gastos_efectivo_actual,
+                gastos_efectivo_promedio_trim_actual, 
+                gastos_efectivo_promedio_trim_anterior,
+                CASE WHEN gastos_efectivo_promedio_trim_actual IS NOT NULL AND gastos_efectivo_promedio_trim_actual!=0 
+                        THEN gastos_efectivo_actual/gastos_efectivo_promedio_trim_actual - 1 ELSE NULL END AS var_gastos_efectivo_mes_actual_trim_anterior,
+                CASE WHEN gastos_efectivo_promedio_trim_anterior IS NOT NULL AND gastos_efectivo_promedio_trim_anterior!=0 
+                        THEN gastos_efectivo_promedio_trim_actual/gastos_efectivo_promedio_trim_anterior - 1 ELSE NULL END AS var_gastos_efectivo_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --8.INGRESOS EFECTIVO--
+                ingresos_efectivo_actual,
+                ingresos_efectivo_promedio_trim_actual, 
+                ingresos_efectivo_promedio_trim_anterior,
+                CASE WHEN ingresos_efectivo_promedio_trim_actual IS NOT NULL AND ingresos_efectivo_promedio_trim_actual!=0 
+                        THEN ingresos_efectivo_actual/ingresos_efectivo_promedio_trim_actual - 1 ELSE NULL END AS var_ingresos_efectivo_mes_actual_trim_anterior,
+                CASE WHEN ingresos_efectivo_promedio_trim_anterior IS NOT NULL AND ingresos_efectivo_promedio_trim_anterior!=0 
+                        THEN ingresos_efectivo_promedio_trim_actual/ingresos_efectivo_promedio_trim_anterior - 1 ELSE NULL END AS var_ingresos_efectivo_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --9.GASTOS FINANCIEROS--
+                gastos_financieros_actual,
+                gastos_financieros_promedio_trim_actual, 
+                gastos_financieros_promedio_trim_anterior,
+                CASE WHEN gastos_financieros_promedio_trim_actual IS NOT NULL AND gastos_financieros_promedio_trim_actual!=0 
+                        THEN gastos_financieros_actual/gastos_financieros_promedio_trim_actual - 1 ELSE NULL END AS var_gastos_financieros_mes_actual_trim_anterior,
+                CASE WHEN gastos_financieros_promedio_trim_anterior IS NOT NULL AND gastos_financieros_promedio_trim_anterior!=0 
+                        THEN gastos_financieros_promedio_trim_actual/gastos_financieros_promedio_trim_anterior - 1 ELSE NULL END AS var_gastos_financieros_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --10.INGRESOS FINANCIEROS--		
+                ingresos_financieros_actual,
+                ingresos_financieros_promedio_trim_actual, 
+                ingresos_financieros_promedio_trim_anterior,
+                CASE WHEN ingresos_financieros_promedio_trim_actual IS NOT NULL AND ingresos_financieros_promedio_trim_actual!=0 
+                        THEN ingresos_financieros_actual/ingresos_financieros_promedio_trim_actual - 1 ELSE NULL END AS var_ingresos_financieros_mes_actual_trim_anterior,
+                CASE WHEN ingresos_financieros_promedio_trim_anterior IS NOT NULL AND ingresos_financieros_promedio_trim_anterior!=0 
+                        THEN ingresos_financieros_promedio_trim_actual/ingresos_financieros_promedio_trim_anterior - 1 ELSE NULL END AS var_ingresos_financieros_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --11.GASTOS CONSUMO--		
+                gastos_consumo_actual,
+                gastos_consumo_promedio_trim_actual, 
+                gastos_consumo_promedio_trim_anterior,
+                CASE WHEN gastos_consumo_promedio_trim_actual IS NOT NULL AND gastos_consumo_promedio_trim_actual!=0 
+                        THEN gastos_consumo_actual/gastos_consumo_promedio_trim_actual - 1 ELSE NULL END AS var_gastos_consumo_mes_actual_trim_anterior,
+                CASE WHEN gastos_consumo_promedio_trim_anterior IS NOT NULL AND gastos_consumo_promedio_trim_anterior!=0 
+                        THEN gastos_consumo_promedio_trim_actual/gastos_consumo_promedio_trim_anterior - 1 ELSE NULL END AS var_gastos_consumo_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --12.INGRESOS CONSUMO--	
+                ingresos_duros_actual,
+                ingresos_duros_promedio_trim_actual, 
+                ingresos_duros_promedio_trim_anterior,
+                CASE WHEN ingresos_duros_promedio_trim_actual IS NOT NULL AND ingresos_duros_promedio_trim_actual!=0 
+                        THEN ingresos_duros_actual/ingresos_duros_promedio_trim_actual - 1 ELSE NULL END AS var_ingresos_duros_mes_actual_trim_anterior,
+                CASE WHEN ingresos_duros_promedio_trim_anterior IS NOT NULL AND ingresos_duros_promedio_trim_anterior!=0 
+                        THEN ingresos_duros_promedio_trim_actual/ingresos_duros_promedio_trim_anterior - 1 ELSE NULL END AS var_ingresos_duros_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --13.GASTOS AHORRO--		
+                gastos_ahorro_actual,
+                gastos_ahorro_promedio_trim_actual, 
+                gastos_ahorro_promedio_trim_anterior,
+                CASE WHEN gastos_ahorro_promedio_trim_actual IS NOT NULL AND gastos_ahorro_promedio_trim_actual!=0 
+                        THEN gastos_ahorro_actual/gastos_ahorro_promedio_trim_actual - 1 ELSE NULL END AS var_gastos_ahorro_mes_actual_trim_anterior,
+                CASE WHEN gastos_ahorro_promedio_trim_anterior IS NOT NULL AND gastos_ahorro_promedio_trim_anterior!=0 
+                        THEN gastos_ahorro_promedio_trim_actual/gastos_ahorro_promedio_trim_anterior - 1 ELSE NULL END AS var_gastos_ahorro_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                --14.INGRESOS AHORRO--	
+                ingresos_ahorro_actual,
+                ingresos_ahorro_promedio_trim_actual, 
+                ingresos_ahorro_promedio_trim_anterior,
+                CASE WHEN ingresos_ahorro_promedio_trim_actual IS NOT NULL AND ingresos_ahorro_promedio_trim_actual!=0 
+                        THEN ingresos_ahorro_actual/ingresos_ahorro_promedio_trim_actual - 1 ELSE NULL END AS var_ingresos_ahorro_mes_actual_trim_anterior,
+                CASE WHEN ingresos_ahorro_promedio_trim_anterior IS NOT NULL AND ingresos_ahorro_promedio_trim_anterior!=0 
+                        THEN ingresos_ahorro_promedio_trim_actual/ingresos_ahorro_promedio_trim_anterior - 1 ELSE NULL END AS var_ingresos_ahorro_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 15.CAPACIDAD AHORRO TOTAL -- 
+                cap_ahorro_total_actual,
+                cap_ahorro_total_promedio_trim_actual,
+                cap_ahorro_total_promedio_trim_anterior,
+                CASE WHEN cap_ahorro_total_promedio_trim_actual IS NOT NULL AND cap_ahorro_total_promedio_trim_actual!=0 
+                        THEN cap_ahorro_total_actual/cap_ahorro_total_promedio_trim_actual - 1 ELSE NULL END AS var_cap_ahorro_total_mes_actual_trim_anterior,
+                CASE WHEN cap_ahorro_total_promedio_trim_anterior IS NOT NULL AND cap_ahorro_total_promedio_trim_anterior!=0 
+                        THEN cap_ahorro_total_promedio_trim_actual/cap_ahorro_total_promedio_trim_anterior - 1 ELSE NULL END AS var_cap_ahorro_total_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 16.CAPACIDAD AHORRO DURA -- 
+                cap_ahorro_dura_actual,
+                cap_ahorro_dura_promedio_trim_actual,
+                cap_ahorro_dura_promedio_trim_anterior,
+                CASE WHEN cap_ahorro_dura_promedio_trim_actual IS NOT NULL AND cap_ahorro_dura_promedio_trim_actual!=0 
+                        THEN cap_ahorro_dura_actual/cap_ahorro_dura_promedio_trim_actual - 1 ELSE NULL END AS var_cap_ahorro_dura_mes_actual_trim_anterior,
+                CASE WHEN cap_ahorro_dura_promedio_trim_anterior IS NOT NULL AND cap_ahorro_dura_promedio_trim_anterior!=0 
+                        THEN cap_ahorro_dura_promedio_trim_actual/cap_ahorro_dura_promedio_trim_anterior - 1 ELSE NULL END AS var_cap_ahorro_dura_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 17.CAPACIDAD AHORRO AUMENTADA -- 
+                cap_ahorro_aumentada_actual,
+                cap_ahorro_aumentada_promedio_trim_actual,
+                cap_ahorro_aumentada_promedio_trim_anterior,
+                CASE WHEN cap_ahorro_aumentada_promedio_trim_actual IS NOT NULL AND cap_ahorro_aumentada_promedio_trim_actual!=0 
+                        THEN cap_ahorro_aumentada_actual/cap_ahorro_aumentada_promedio_trim_actual - 1 ELSE NULL END AS var_cap_ahorro_aumentada_mes_actual_trim_anterior,
+                CASE WHEN cap_ahorro_aumentada_promedio_trim_anterior IS NOT NULL AND cap_ahorro_aumentada_promedio_trim_anterior!=0 
+                        THEN cap_ahorro_aumentada_promedio_trim_actual/cap_ahorro_aumentada_promedio_trim_anterior - 1 ELSE NULL END AS var_cap_ahorro_aumentada_trim_actual_anterior
+        FROM sb_gf.tabla_movimientos_indicadores_03_{fec_info_input}''')
+
+spark.sql(f'DROP VIEW IF EXISTS sb_gf.tabla_movimientos_indicadores_00_{fec_info_input}')
+spark.sql(f'DROP VIEW IF EXISTS sb_gf.tabla_movimientos_indicadores_01_{fec_info_input}')
+spark.sql(f'DROP VIEW IF EXISTS sb_gf.tabla_movimientos_indicadores_02_{fec_info_input}')
+spark.sql(f'DROP VIEW IF EXISTS sb_gf.tabla_movimientos_indicadores_03_{fec_info_input}')
+
+spark.sql(f'''INSERT INTO TABLE sb_gf.tabla_movimientos_mensual_nivel_cliente_indicadores 
+          PARTITION (fec_info={fec_info_input})
+          SELECT
+                c.buc_cliente,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 1.INGRESOS TOTALES --
+                c.ingreso_total_actual,
+                c.ingreso_promedio_trim_actual,
+                c.ingreso_promedio_trim_anterior,
+                CASE WHEN c.ingreso_total_actual != 0 AND c.ingreso_total_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_ingresos,
+                c.var_ingreso_mes_actual_trim_anterior,
+                c.var_ingreso_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 2.GASTOS TOTALES --
+                c.gasto_total_actual,
+                c.gasto_promedio_trim_actual, 
+                c.gasto_promedio_trim_anterior,
+                CASE WHEN c.gasto_total_actual != 0 AND c.gasto_total_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_gastos,
+                c.var_gasto_mes_actual_trim_anterior,
+                c.var_gasto_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 3.GASTOS BLANDOS --
+                c.gastos_blandos_actual,
+                c.gastos_blandos_promedio_trim_actual,
+                c.gastos_blandos_promedio_trim_anterior,
+                CASE WHEN c.gastos_blandos_actual != 0 AND c.gastos_blandos_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_gastos_blandos,
+                c.var_gastos_blandos_mes_actual_trim_anterior,
+                c.var_gastos_blandos_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 4.INGRESOS BLANDOS --
+                c.ingresos_blandos_actual,
+                c.ingresos_blandos_promedio_trim_actual, 
+                c.ingresos_blandos_promedio_trim_anterior,
+                CASE WHEN c.ingresos_blandos_actual != 0 AND c.ingresos_blandos_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_ingresos_blandos,
+                c.var_ingresos_blandos_mes_actual_trim_anterior,
+                c.var_ingresos_blandos_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 5.GASTOS TRANSFERENCIA --
+                c.gastos_transferencia_actual,
+                c.gastos_transferencia_promedio_trim_actual, 
+                c.gastos_transferencia_promedio_trim_anterior,
+                CASE WHEN c.gastos_transferencia_actual != 0 AND c.gastos_transferencia_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_gastos_transferencia,
+                c.var_gastos_transferencia_mes_actual_trim_anterior,
+                c.var_gastos_transferencia_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 6.INGRESOS TRANSFERENCIAS --
+                c.ingresos_transferencia_actual,
+                c.ingresos_transferencia_promedio_trim_actual, 
+                c.ingresos_transferencia_promedio_trim_anterior,
+                CASE WHEN c.ingresos_transferencia_actual != 0 AND c.ingresos_transferencia_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_ingresos_transferencia,
+                c.var_ingresos_transferencia_mes_actual_trim_anterior,
+                c.var_ingresos_transferencia_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 7.GASTOS EFECTIVO --
+                c.gastos_efectivo_actual,
+                c.gastos_efectivo_promedio_trim_actual, 
+                c.gastos_efectivo_promedio_trim_anterior,
+                CASE WHEN c.gastos_efectivo_actual != 0 AND c.gastos_efectivo_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_gastos_efectivo,
+                c.var_gastos_efectivo_mes_actual_trim_anterior,
+                c.var_gastos_efectivo_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 8.GASTOS EFECTIVO --
+                c.ingresos_efectivo_actual,
+                c.ingresos_efectivo_promedio_trim_actual, 
+                c.ingresos_efectivo_promedio_trim_anterior,
+                CASE WHEN c.ingresos_efectivo_actual != 0 AND c.ingresos_efectivo_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_ingresos_efectivo,
+                c.var_ingresos_efectivo_mes_actual_trim_anterior,
+                c.var_ingresos_efectivo_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 9.GASTOS FINANCIEROS --
+                c.gastos_financieros_actual,
+                c.gastos_financieros_promedio_trim_actual, 
+                c.gastos_financieros_promedio_trim_anterior,
+                CASE WHEN c.gastos_financieros_actual != 0 AND c.gastos_financieros_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_gastos_financieros,
+                c.var_gastos_financieros_mes_actual_trim_anterior,
+                c.var_gastos_financieros_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 10.INGRESOS FINANCIEROS --
+                c.ingresos_financieros_actual,
+                c.ingresos_financieros_promedio_trim_actual, 
+                c.ingresos_financieros_promedio_trim_anterior,
+                CASE WHEN c.ingresos_financieros_actual != 0 AND c.ingresos_financieros_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_ingresos_financieros,
+                c.var_ingresos_financieros_mes_actual_trim_anterior,
+                c.var_ingresos_financieros_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 11.GASTOS CONSUMO --
+                c.gastos_consumo_actual,
+                c.gastos_consumo_promedio_trim_actual, 
+                c.gastos_consumo_promedio_trim_anterior,
+                CASE WHEN c.gastos_consumo_actual != 0 AND c.gastos_consumo_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_gastos_consumo,
+                c.var_gastos_consumo_mes_actual_trim_anterior,
+                c.var_gastos_consumo_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 12.INGRESOS DUROS --
+                c.ingresos_duros_actual,
+                c.ingresos_duros_promedio_trim_actual, 
+                c.ingresos_duros_promedio_trim_anterior,
+                CASE WHEN c.ingresos_duros_actual != 0 AND c.ingresos_duros_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_ingresos_duros,
+                c.var_ingresos_duros_mes_actual_trim_anterior,
+                c.var_ingresos_duros_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 13.GASTOS AHORRO --
+                c.gastos_ahorro_actual,
+                c.gastos_ahorro_promedio_trim_actual, 
+                c.gastos_ahorro_promedio_trim_anterior,
+                CASE WHEN c.gastos_ahorro_actual != 0 AND c.gastos_ahorro_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_gastos_ahorro,
+                c.var_gastos_ahorro_mes_actual_trim_anterior,
+                c.var_gastos_ahorro_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 14.INGRESOS AHORRO --
+                c.ingresos_ahorro_actual,
+                c.ingresos_ahorro_promedio_trim_actual, 
+                c.ingresos_ahorro_promedio_trim_anterior,
+                CASE WHEN c.ingresos_ahorro_actual != 0 AND c.ingresos_ahorro_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_ingresos_ahorro,
+                c.var_ingresos_ahorro_mes_actual_trim_anterior,
+                c.var_ingresos_ahorro_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 15.CAPACIDAD AHORRO TOTAL --
+                c.cap_ahorro_total_actual,
+                c.cap_ahorro_total_promedio_trim_actual,
+                c.cap_ahorro_total_promedio_trim_anterior,
+                CASE WHEN c.cap_ahorro_total_actual != 0 AND c.cap_ahorro_total_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_cap_ahorro_total,
+                c.var_cap_ahorro_total_mes_actual_trim_anterior,
+                c.var_cap_ahorro_total_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 16.CAPACIDAD AHORRO DURA --
+                c.cap_ahorro_dura_actual,
+                c.cap_ahorro_dura_promedio_trim_actual,
+                c.cap_ahorro_dura_promedio_trim_anterior,
+                CASE WHEN c.cap_ahorro_dura_actual != 0 AND c.cap_ahorro_dura_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_cap_ahorro_dura,
+                c.var_cap_ahorro_dura_mes_actual_trim_anterior,
+                c.var_cap_ahorro_dura_trim_actual_anterior,
+                ---------------------------------------------------------------------------------------------------------------------------------
+                -- 17.CAPACIDAD AHORRO DURA --
+                c.cap_ahorro_aumentada_actual,
+                c.cap_ahorro_aumentada_promedio_trim_actual,
+                c.cap_ahorro_aumentada_promedio_trim_anterior,
+                CASE WHEN c.cap_ahorro_aumentada_actual != 0 AND c.cap_ahorro_aumentada_actual IS NOT NULL THEN 1 ELSE 0 END AS indicador_cap_ahorro_aumentada,
+                c.var_cap_ahorro_aumentada_mes_actual_trim_anterior,
+                c.var_cap_ahorro_aumentada_trim_actual_anterior
+        FROM sb_gf.tabla_movimientos_indicadores_04_{fec_info_input} c ''')
+
+spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_movimientos_indicadores_04_{fec_info_input}')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
