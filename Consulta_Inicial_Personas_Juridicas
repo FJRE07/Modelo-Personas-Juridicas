@@ -1,0 +1,214 @@
+CREATE TABLE sb_gf.ml_ready_reentrenamiento_simplai_2024_personas_juridicas_modelo_indexed_cortes_expertos AS
+SELECT
+buc_cliente,
+fec_info,
+flag_opcion_3_12_meses as target,
+cod_tip_persona,
+modelo_atencion_nuevo,
+riesgo_actual,
+saldo_medio_actual,
+ingreso_total_actual,
+gasto_total_actual,
+id_activo_personas_juridicas,
+CASE 
+    WHEN nuevo_nivel="WEALTH MANAGEMENT" THEN 1
+    WHEN nuevo_nivel="GLOBAL TRANSACTION BANKING" THEN 2
+    WHEN nuevo_nivel="EMPRESAS" THEN 3
+    WHEN nuevo_nivel="PYMES" THEN 4
+    WHEN nuevo_nivel="INSTITUCIONES" THEN 5
+    ELSE 6
+END AS nuevo_nivel_mod,
+CASE
+  WHEN edad IS NULL THEN 0
+  WHEN edad <= 0 THEN 1
+  WHEN edad <= 3  THEN 2
+  WHEN edad <= 5  THEN 3
+  WHEN edad <= 15  THEN 4
+  WHEN edad > 15 THEN 5
+END AS edad_buckets,
+CASE
+  WHEN cap_ahorro_total_actual IS NULL THEN 0
+  WHEN cap_ahorro_total_actual <= -15000 THEN 1
+  WHEN cap_ahorro_total_actual <= 0  THEN 2
+  WHEN cap_ahorro_total_actual <= 50000  THEN 3
+  WHEN cap_ahorro_total_actual > 50000 THEN 4
+END AS cap_ahorro_total_actual_buckets,
+CASE
+  WHEN cap_ahorro_aumentada_actual IS NULL THEN 0
+  WHEN cap_ahorro_aumentada_actual <= -15000 THEN 1
+  WHEN cap_ahorro_aumentada_actual <= 0  THEN 2
+  WHEN cap_ahorro_aumentada_actual <= 50000  THEN 3
+  WHEN cap_ahorro_aumentada_actual > 50000 THEN 4
+END AS cap_ahorro_aumentada_actual_buckets,
+CASE
+  WHEN ingresos_efectivo_actual IS NULL THEN 0
+  WHEN ingresos_efectivo_actual <= 6000  THEN 1
+  WHEN ingresos_efectivo_actual > 6000 THEN 2
+END AS ingresos_efectivo_actual_buckets,
+CASE
+  WHEN var_gastos_consumo_mes_actual_trim_anterior IS NULL THEN 0
+  WHEN var_gastos_consumo_mes_actual_trim_anterior <= -1 THEN 1
+  WHEN var_gastos_consumo_mes_actual_trim_anterior <= -0.5  THEN 2
+  WHEN var_gastos_consumo_mes_actual_trim_anterior <= -0.2  THEN 3
+  WHEN var_gastos_consumo_mes_actual_trim_anterior <= 0  THEN 4
+  WHEN var_gastos_consumo_mes_actual_trim_anterior <= 0.2  THEN 5
+  WHEN var_gastos_consumo_mes_actual_trim_anterior <= 0.5  THEN 6
+  WHEN var_gastos_consumo_mes_actual_trim_anterior <= 1  THEN 7
+  WHEN var_gastos_consumo_mes_actual_trim_anterior > 1 THEN 8
+END AS var_gastos_consumo_mes_actual_trim_anterior_buckets,
+CASE
+  WHEN ingresos_financieros_promedio_trim_anterior IS NULL THEN 0
+  WHEN ingresos_financieros_promedio_trim_anterior <= 30000  THEN 1
+  WHEN ingresos_financieros_promedio_trim_anterior > 30000 THEN 2
+END AS ingresos_financieros_promedio_trim_anterior_buckets,
+CASE
+  WHEN ingresos_duros_actual IS NULL THEN 0
+  WHEN ingresos_duros_actual <= 100000  THEN 1
+  WHEN ingresos_duros_actual > 100000 THEN 2
+END AS ingresos_duros_actual_buckets,
+CASE
+  WHEN vinc_saldos_nuevo IS NULL THEN 0
+  WHEN vinc_saldos_nuevo <= 12  THEN 1
+  WHEN vinc_saldos_nuevo > 12 THEN 2
+END AS vinc_saldos_nuevo_buckets,
+CASE
+  WHEN gastos_efectivo_promedio_trim_anterior IS NULL THEN 0
+  WHEN gastos_efectivo_promedio_trim_anterior <= -100000 THEN 1
+  WHEN gastos_efectivo_promedio_trim_anterior <= -30000  THEN 2
+  WHEN gastos_efectivo_promedio_trim_anterior <= 0  THEN 3
+  WHEN gastos_efectivo_promedio_trim_anterior > 0 THEN 4
+END AS gastos_efectivo_promedio_trim_anterior_buckets,
+CASE
+  WHEN var_12m IS NULL THEN 0
+  WHEN var_12m <= -1 THEN 1
+  WHEN var_12m <= -0.5  THEN 2
+  WHEN var_12m <= -0.2  THEN 3
+  WHEN var_12m <= 0  THEN 4
+  WHEN var_12m <= 0.2  THEN 5
+  WHEN var_12m <= 0.5  THEN 6
+  WHEN var_12m <= 1  THEN 7
+  WHEN var_12m <= 2  THEN 8
+  WHEN var_12m > 2 THEN 9
+END AS var_12m_buckets,
+CASE
+  WHEN variacion_saldo_semestral_num IS NULL THEN 0
+  WHEN variacion_saldo_semestral_num <= -1 THEN 1
+  WHEN variacion_saldo_semestral_num <= -0.5  THEN 2
+  WHEN variacion_saldo_semestral_num <= -0.2  THEN 3
+  WHEN variacion_saldo_semestral_num <= 0  THEN 4
+  WHEN variacion_saldo_semestral_num <= 0.2  THEN 5
+  WHEN variacion_saldo_semestral_num <= 0.5  THEN 6
+  WHEN variacion_saldo_semestral_num <= 1  THEN 7
+  WHEN variacion_saldo_semestral_num <= 2  THEN 8
+  WHEN variacion_saldo_semestral_num > 2 THEN 9
+END AS variacion_saldo_semestral_num_buckets,
+CASE
+  WHEN var_gastos_transferencia_mes_actual_trim_anterior IS NULL THEN 0
+  WHEN var_gastos_transferencia_mes_actual_trim_anterior <= -1 THEN 1
+  WHEN var_gastos_transferencia_mes_actual_trim_anterior <= -0.5  THEN 2
+  WHEN var_gastos_transferencia_mes_actual_trim_anterior <= -0.2  THEN 3
+  WHEN var_gastos_transferencia_mes_actual_trim_anterior <= 0  THEN 4
+  WHEN var_gastos_transferencia_mes_actual_trim_anterior <= 0.2  THEN 5
+  WHEN var_gastos_transferencia_mes_actual_trim_anterior <= 0.5  THEN 6
+  WHEN var_gastos_transferencia_mes_actual_trim_anterior <= 1  THEN 7
+  WHEN var_gastos_transferencia_mes_actual_trim_anterior > 1 THEN 8
+END AS var_gastos_transferencia_mes_actual_trim_anterior_buckets,
+CASE
+  WHEN ingresos_transferencia_actual IS NULL THEN 0
+  WHEN ingresos_transferencia_actual <= 10000 THEN 1
+  WHEN ingresos_transferencia_actual <= 150000  THEN 2
+  WHEN ingresos_transferencia_actual <= 1000000  THEN 3
+  WHEN ingresos_transferencia_actual > 1000000 THEN 4
+END AS ingresos_transferencia_actual_buckets,
+CASE
+  WHEN contador_sube IS NULL THEN 0
+  WHEN contador_sube <= 2 THEN 1
+  WHEN contador_sube <= 4  THEN 2
+  WHEN contador_sube <= 6  THEN 3
+  WHEN contador_sube <= 8  THEN 4
+  WHEN contador_sube > 8 THEN 5
+END AS contador_sube_buckets,
+CASE
+  WHEN saldo_medio_actual IS NULL THEN 0
+  WHEN saldo_medio_actual <= 15000 THEN 1
+  WHEN saldo_medio_actual <= 50000  THEN 2
+  WHEN saldo_medio_actual <= 300000  THEN 3
+  WHEN saldo_medio_actual > 300000 THEN 4
+END AS saldo_medio_actual_buckets,
+CASE
+  WHEN var_ingreso_mes_actual_trim_anterior IS NULL THEN 0
+  WHEN var_ingreso_mes_actual_trim_anterior <= -1 THEN 1
+  WHEN var_ingreso_mes_actual_trim_anterior <= -0.5  THEN 2
+  WHEN var_ingreso_mes_actual_trim_anterior <= -0.2  THEN 3
+  WHEN var_ingreso_mes_actual_trim_anterior <= 0  THEN 4
+  WHEN var_ingreso_mes_actual_trim_anterior <= 0.2  THEN 5
+  WHEN var_ingreso_mes_actual_trim_anterior <= 0.5  THEN 6
+  WHEN var_ingreso_mes_actual_trim_anterior <= 1  THEN 7
+  WHEN var_ingreso_mes_actual_trim_anterior > 1 THEN 8
+END AS var_ingreso_mes_actual_trim_anterior_buckets,
+CASE
+  WHEN contador_plano IS NULL THEN 0
+  WHEN contador_plano <= 1 THEN 1
+  WHEN contador_plano <= 3  THEN 2
+  WHEN contador_plano <= 7  THEN 3
+  WHEN contador_plano > 7 THEN 4
+END AS contador_plano_buckets,
+CASE
+  WHEN var_ingresos_transferencia_mes_actual_trim_anterior IS NULL THEN 0
+  WHEN var_ingresos_transferencia_mes_actual_trim_anterior <= -1 THEN 1
+  WHEN var_ingresos_transferencia_mes_actual_trim_anterior <= -0.5  THEN 2
+  WHEN var_ingresos_transferencia_mes_actual_trim_anterior <= -0.2  THEN 3
+  WHEN var_ingresos_transferencia_mes_actual_trim_anterior <= 0  THEN 4
+  WHEN var_ingresos_transferencia_mes_actual_trim_anterior <= 0.2  THEN 5
+  WHEN var_ingresos_transferencia_mes_actual_trim_anterior <= 0.5  THEN 6
+  WHEN var_ingresos_transferencia_mes_actual_trim_anterior <= 1  THEN 7
+  WHEN var_ingresos_transferencia_mes_actual_trim_anterior > 1 THEN 8
+END AS var_ingresos_transferencia_mes_actual_trim_anterior_buckets,
+CASE
+  WHEN var_gastos_financieros_trim_actual_anterior IS NULL THEN 0
+  WHEN var_gastos_financieros_trim_actual_anterior <= -1 THEN 1
+  WHEN var_gastos_financieros_trim_actual_anterior <= -0.5  THEN 2
+  WHEN var_gastos_financieros_trim_actual_anterior <= -0.2  THEN 3
+  WHEN var_gastos_financieros_trim_actual_anterior <= 0  THEN 4
+  WHEN var_gastos_financieros_trim_actual_anterior <= 0.2  THEN 5
+  WHEN var_gastos_financieros_trim_actual_anterior <= 0.5  THEN 6
+  WHEN var_gastos_financieros_trim_actual_anterior <= 1  THEN 7
+  WHEN var_gastos_financieros_trim_actual_anterior > 1 THEN 8
+END AS var_gastos_financieros_trim_actual_anterior_buckets,
+CASE
+  WHEN var_cap_ahorro_dura_mes_actual_trim_anterior IS NULL THEN 0
+  WHEN var_cap_ahorro_dura_mes_actual_trim_anterior <= -1 THEN 1
+  WHEN var_cap_ahorro_dura_mes_actual_trim_anterior <= -0.5  THEN 2
+  WHEN var_cap_ahorro_dura_mes_actual_trim_anterior <= -0.2  THEN 3
+  WHEN var_cap_ahorro_dura_mes_actual_trim_anterior <= 0  THEN 4
+  WHEN var_cap_ahorro_dura_mes_actual_trim_anterior <= 0.2  THEN 5
+  WHEN var_cap_ahorro_dura_mes_actual_trim_anterior <= 0.5  THEN 6
+  WHEN var_cap_ahorro_dura_mes_actual_trim_anterior <= 1  THEN 7
+  WHEN var_cap_ahorro_dura_mes_actual_trim_anterior > 1 THEN 8
+END AS var_cap_ahorro_dura_mes_actual_trim_anterior_buckets,
+CASE
+  WHEN gastos_transferencia_promedio_trim_anterior IS NULL THEN 0
+  WHEN gastos_transferencia_promedio_trim_anterior <= -1000000 THEN 1
+  WHEN gastos_transferencia_promedio_trim_anterior <= -200000  THEN 2
+  WHEN gastos_transferencia_promedio_trim_anterior <= -5000  THEN 3
+  WHEN gastos_transferencia_promedio_trim_anterior > -5000 THEN 4
+END AS gastos_transferencia_promedio_trim_anterior_buckets,
+CASE
+  WHEN var_gasto_mes_actual_trim_anterior IS NULL THEN 0
+  WHEN var_gasto_mes_actual_trim_anterior <= -1 THEN 1
+  WHEN var_gasto_mes_actual_trim_anterior <= -0.5  THEN 2
+  WHEN var_gasto_mes_actual_trim_anterior <= -0.2  THEN 3
+  WHEN var_gasto_mes_actual_trim_anterior <= 0  THEN 4
+  WHEN var_gasto_mes_actual_trim_anterior <= 0.2  THEN 5
+  WHEN var_gasto_mes_actual_trim_anterior <= 0.5  THEN 6
+  WHEN var_gasto_mes_actual_trim_anterior <= 1  THEN 7
+  WHEN var_gasto_mes_actual_trim_anterior > 1 THEN 8
+END AS var_gasto_mes_actual_trim_anterior_buckets,
+CASE
+  WHEN gastos_financieros_actual IS NULL THEN 0
+  WHEN gastos_financieros_actual <= -50000 THEN 1
+  WHEN gastos_financieros_actual <= -10000  THEN 2
+  WHEN gastos_financieros_actual > -10000 THEN 3
+END AS gastos_financieros_actual_buckets FROM sb_gf.ml_ready_reentrenamiento_simplai_2024_vf_10_personas_juridicas
+ WHERE cod_tip_persona='J' AND fec_info >=202201 AND fec_info<=202302 AND (id_activo_personas_juridicas=1 OR id_activo_personas_juridicas IS NULL ) 
+
