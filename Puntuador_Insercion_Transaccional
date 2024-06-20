@@ -1,5 +1,20 @@
+### PROCESO PARA ACTUALIZACIÓN DE INDICADORES DEL TRANSACCIONAL
+
+#### 1. Agrupación a nivel contrato
+
+1. Se debe mensualizar los movimientos crudos para el mes deseado
+    - El nombre de la tabla se debe cambiar con base al mes que deseamos obtener. También se deberá cambiar el mes para la extracción del mes 
+    
+Por ejemplo
+Se desea agregar noviembre de 2021, es decir, 202111. Por lo tanto, el nombre de la tabla será:
+- **"CREATE TABLE sb_gf.tabla_movimientos_simplai_nivel_cliente_noviembre_2021_nuevo"**
+
+También, el yyyymm será 20211
+- **CAST(CONCAT(SUBSTRING(B.fec_operacion, 1, 4), SUBSTRING(B.fec_operacion, 6, 2)) AS INT) IN (202111)**
+
 CREATE TABLE sb_gf.tabla_movimientos_simplai_nivel_cliente_noviembre_2021_nuevo AS
 SELECT 
+	--SE AGRUPAN LAS OPERACIONES CON BASE AL NÚMERO DEL CONTRATO--
 	paso_2.fec_info, 
 	paso_2.num_contrato, 
 	--INGRESOS TOTALES--
@@ -31,6 +46,7 @@ SELECT
 	--12.INGRESOS AHORRO--
 	SUM(CASE WHEN paso_2.indicador_agrupado ="INGRESOS_AHORRO" THEN paso_2.imp_operacion ELSE 0 END) AS INGRESOS_AHORRO
 FROM (SELECT 
+		-- SE APLICA EL EJERCICICO DE TEXT MINING A LAS DESCRIPCIONES DE LAS OPERACIONES--
 		paso_1.*,
 		CASE 
 			-- CASOS PUNTUALES--
@@ -237,6 +253,7 @@ FROM (SELECT
 			--OTROS INGRESOS BLANDOS--																				
 			WHEN (paso_1.ind_cargo_abono = 'H') THEN "INGRESOS_BLANDOS"
 			END AS indicador_agrupado
+		-- SE EXTRAE LOS MOVIMENTOS DEL MES DESEADO JUNTO CON LA DESCRIPCIÓN DE LA OPERACIÓN--
 		FROM (SELECT 
 				B.fec_operacion,
 				CAST(CONCAT(SUBSTRING(B.fec_operacion, 1, 4),
@@ -264,12 +281,17 @@ FROM (SELECT
 GROUP BY fec_info, num_contrato;
 
 
+### 2. Relación ID-cliente-contrato
+La información se agrega a nivel cliente los contratos. Es decir, asignarle los contratos respectivos a cada cliente dentro de la base de captación. Para hacer más eficiente el proceso de agregación de datos se realiza un bucle sobre los meses declarados en el diccionario de meses, se debe ingresar tanto el mes como el nombre de la tabla correspondiente al mes. 
+
+## SE DECLARA EL DICCIONARIO CON LOS MESES QUE SE DESEAN AGREGAR JUNTO CON SU CORRESPONDIENTE TABLA--
 diccionario={
-        202108:'tabla_movimientos_simplai_nivel_cliente_2021_agosto_nuevo'
+        202111:'tabla_movimientos_simplai_nivel_cliente_noviembre_2021_nuevo'
         }
 
 for mes in diccionario.keys():
         base=diccionario[mes]
+        ## SE EXTRAEN LOS CLIENTES DE LA BASE DE CAPTACIÓN PARA EL MES ##
         spark.sql('DROP VIEW IF EXISTS sb_gf.agregacion_transaccional_paso_1')
         spark.sql(f'''CREATE VIEW sb_gf.agregacion_transaccional_paso_1 AS
                 SELECT 
@@ -281,7 +303,7 @@ for mes in diccionario.keys():
                 WHERE 
                         ROUND(fec_data/100, 0) ={mes}
                 GROUP BY ROUND(fec_data/100, 0),num_cuenta''')
-
+        ## SE AGREGAN LOS MOVIMIENTOS A NIVEL CLIENTE CON BASE A LAS CUENTAS QUE CADA CLIENTE TIENE DENTRO DEL BANCO ##
         spark.sql(f'''CREATE TABLE sb_gf.agregacion_transaccional_paso_2 
                 SELECT
                         a.fec_info,
@@ -309,7 +331,7 @@ for mes in diccionario.keys():
                 GROUP BY 
                         a.fec_info,a.buc_cliente''')
         spark.sql('DROP VIEW IF EXISTS sb_gf.agregacion_transaccional_paso_1')
-
+        ## SE INSERTAN DENTRO DE LA BASE DE MOVIMIENTOS A NIVEL CLIENTE HISTÓRICO ##
         spark.sql(f'''INSERT INTO TABLE sb_gf.tabla_movimientos_mensual_nivel_cliente
 		   		PARTITION(fec_info={mes})
 				   	SELECT 
@@ -333,9 +355,24 @@ for mes in diccionario.keys():
 					WHERE fec_info={mes}''')
         spark.sql('DROP TABLE IF EXISTS sb_gf.agregacion_transaccional_paso_2')
 
+#### 3.	Creación de indicadores de transaccionalidad avanzados
+
+Una vez obtenido los datos brutos de la información de movimientos para el mes deseado a nivel cliente, se prosigue con la construcción de los indicadores. Como nota importante, es necesario tener una profundidad de 6 meses de historia para generar los indicadores del mes actual, debido a que se generan indicadores de variación trimestrales.
+En este apartado, se manda crean los indicadores de un mes en específico, por lo que se debe cambiar la variable "fec_info_input".
+
+from turtle import onclick
+from pyspark.sql import SparkSession
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 
-fec_info_input=202212
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+
+## BASE QUE CONTIENE LOS MOVIMIENTOS CRUDOS A NIVEL CLIENTE ## 
+base='tabla_movimientos_mensual_nivel_cliente'
+
+## MES QUE SE DESEA AGREGAR A LA BASE DE INDICADORES ##
+fec_info_input=202211
 
 spark.sql("USE sb_gf")
 
@@ -1568,18 +1605,3 @@ spark.sql(f'''INSERT INTO TABLE sb_gf.tabla_movimientos_mensual_nivel_cliente_in
         FROM sb_gf.tabla_movimientos_indicadores_04_{fec_info_input} c ''')
 
 spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_movimientos_indicadores_04_{fec_info_input}')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
