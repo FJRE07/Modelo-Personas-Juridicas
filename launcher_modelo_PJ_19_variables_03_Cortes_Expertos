@@ -1,0 +1,146 @@
+from pyspark.sql import SparkSession
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+from pyspark.sql.window import Window
+from pyspark.sql.types import FloatType, StringType
+from pyspark.sql.functions import udf,percent_rank
+from pyspark.ml.classification import GBTClassificationModel
+from pyspark.sql.functions import lit
+from pyspark.sql.types import StructType, StructField, StringType, FloatType
+from pyspark.sql.functions import col
+ 
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+spark.conf.set("spark.sql.sources.default", "hive")
+spark.sql(f"USE sb_gf")
+ 
+
+#Definición variables a aplicar al modelo
+variables_diccionario={
+    # 1 #
+    'edad':{'Tipo':'Discretizada','J':[0,3,5,15]},
+    # 2 #
+    'cap_ahorro_total_actual':{'Tipo':'Discretizada','J':[-10000,0,50000]},
+    # 3 #
+    'ingresos_efectivo_actual':{'Tipo':'Discretizada','J':[6000]},
+    # 4 #
+    'var_gastos_consumo_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 5 #
+    'ingresos_financieros_promedio_trim_anterior':{'Tipo':'Discretizada','J':[30000]},
+    # 6 #
+    'ingresos_duros_actual':{'Tipo':'Discretizada','J':[100000]},
+    # 7 #
+    'vinc_saldos_nuevo':{'Tipo':'Discretizada','J':[11]},
+    # 8 #
+    'var_12m':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]},
+    # 9 #
+    'variacion_saldo_semestral_num':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]},
+    # 10 #
+    'var_gastos_transferencia_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 11 #
+    'contador_sube':{'Tipo':'Discretizada','J':[2,4,6,8]},
+    # 12 #
+    'saldo_medio_actual':{'Tipo':'Discretizada','J':[15000,50000,300000]},
+    # 13 #
+    'var_gastos_financieros_trim_actual_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 14 #
+    'var_cap_ahorro_dura_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 15 #
+    'ingreso_total_actual':{'Tipo':'Discretizada','J':[30000,300000,1500000]},
+    # 16 #
+    'gasto_total_actual':{'Tipo':'Discretizada','J':[-1500000,-300000,-30000]},
+    # 17 #
+    'variacion_saldo_trimestral_num':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]},
+    # 18 #
+    'variacion_saldo_12m_num':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]}
+}
+
+lista_variables=['nuevo_nivel_mod']
+for variable in variables_diccionario:
+    if variables_diccionario[variable]['Tipo']=='Discretizada':
+        lista_variables.append(f'{variable}_buckets')
+    else:
+        lista_variables.append(f'{variable}')
+
+print(f'LISTA VARIABLES: {lista_variables}')
+
+df_00_total_index=spark.sql('''SELECT * FROM sb_gf.ml_ready_reentrenamiento_simplai_2024_personas_juridicas_modelo_indexed_cortes_expertos_19_variables''')
+
+
+#### PREPARACION TRAIN TEST ####
+df_00 = df_00_total_index.filter(
+    (col("fec_info") >= "202203") & (col("fec_info") <= "202210") &
+    ((col("riesgo_actual").isNull()) | (col("riesgo_actual") < 150000000)) &
+    ((col("saldo_medio_actual").isNull()) | (col("saldo_medio_actual") < 150000000)) &
+    ((col("ingreso_total_actual").isNull()) | (col("ingreso_total_actual") < 150000000)) &
+    ((col("gasto_total_actual").isNull()) | (col("gasto_total_actual") > -150000000))
+)
+
+df_01=df_00.na.fill(value = 0, subset = lista_variables)
+assemble_00 = VectorAssembler(inputCols = lista_variables, outputCol = 'features')
+df_02 = assemble_00.transform(df_01)
+
+#Separacion Train /Test para modelo
+df_train, df_test = df_02.randomSplit([0.80, 0.20], seed = 2)
+ 
+#Entrenamiento del modelo
+
+gbt_model_00 = GBTClassificationModel.load("/pro/workspace/gf/models/classification_pj_2024_cortes_expertos_19_variables")
+
+df_predictions_test = gbt_model_00.transform(df_test)
+ 
+evaluator = BinaryClassificationEvaluator(labelCol = 'target', rawPredictionCol = 'probability')
+
+fis_var_fi_pf = gbt_model_00.featureImportances.toArray()
+
+dict_importancia = [{"id": index, "feat_name": feat, "fi": -1} for index, feat in enumerate(lista_variables)] 
+for index, fi in enumerate(fis_var_fi_pf):
+        dict_importancia[index]["fi"] = fis_var_fi_pf[index]
+ 
+schema = StructType([
+    StructField("feat_name", StringType(), True),
+    StructField("fi", FloatType(), True)
+])
+
+data = [(feat["feat_name"], float(feat["fi"])) for feat in dict_importancia]
+df = spark.createDataFrame(data, schema)
+df.write.mode('overwrite').saveAsTable('sb_gf.df_feature_importance_simplai_2024_personas_juridicas_estabilidad_cortes_expertos_19_variables')
+
+to_array_function = udf(lambda v: v.toArray().tolist()[1], FloatType())
+df_predictions_test = df_predictions_test.withColumn('probability', to_array_function('probability'))
+ 
+ 
+#Obtencion puntos de corte quartiles a base test
+
+def rank_classification(val):
+    if val < 0.25: return 'A'
+    elif val < 0.5: return 'B'
+    elif val < 0.75: return 'C'
+    else: return 'D'
+rank_function = udf(lambda x: rank_classification(x), StringType())
+
+df_ranked_wealth_mgt =df_predictions_test.filter(col("nuevo_nivel_mod")==1)
+df_ranked_wealth_mgt = df_ranked_wealth_mgt.withColumn("percent_rank", percent_rank().over(Window.partitionBy(df_ranked_wealth_mgt['cod_tip_persona']).orderBy(df_ranked_wealth_mgt['probability'])))
+df_ranked_wealth_mgt = df_ranked_wealth_mgt.withColumn('category', rank_function('percent_rank'))
+
+df_ranked_gbt =df_predictions_test.filter(col("nuevo_nivel_mod")==2)
+df_ranked_gbt = df_ranked_gbt.withColumn("percent_rank", percent_rank().over(Window.partitionBy(df_ranked_gbt['cod_tip_persona']).orderBy(df_ranked_gbt['probability'])))
+df_ranked_gbt = df_ranked_gbt.withColumn('category', rank_function('percent_rank'))
+
+df_ranked_empresas =df_predictions_test.filter(col("nuevo_nivel_mod")==3)
+df_ranked_empresas = df_ranked_empresas.withColumn("percent_rank", percent_rank().over(Window.partitionBy(df_ranked_empresas['cod_tip_persona']).orderBy(df_ranked_empresas['probability'])))
+df_ranked_empresas = df_ranked_empresas.withColumn('category', rank_function('percent_rank'))
+
+df_ranked_pymes =df_predictions_test.filter(col("nuevo_nivel_mod")==4)
+df_ranked_pymes = df_ranked_pymes.withColumn("percent_rank", percent_rank().over(Window.partitionBy(df_ranked_pymes['cod_tip_persona']).orderBy(df_ranked_pymes['probability'])))
+df_ranked_pymes = df_ranked_pymes.withColumn('category', rank_function('percent_rank'))
+
+df_ranked_instituciones =df_predictions_test.filter(col("nuevo_nivel_mod")==5)
+df_ranked_instituciones = df_ranked_instituciones.withColumn("percent_rank", percent_rank().over(Window.partitionBy(df_ranked_instituciones['cod_tip_persona']).orderBy(df_ranked_instituciones['probability'])))
+df_ranked_instituciones = df_ranked_instituciones.withColumn('category', rank_function('percent_rank'))
+
+
+df_ranked=df_ranked_wealth_mgt.union(df_ranked_gbt).union(df_ranked_empresas).union(df_ranked_pymes).union(df_ranked_instituciones)
+df_ranked.write.mode('overwrite').saveAsTable('sb_gf.df_test_predictions_simplai_2024_personas_juridicas_estabilidad_clasificado_cortes_expertos_19_variables')
+ 
+
+
