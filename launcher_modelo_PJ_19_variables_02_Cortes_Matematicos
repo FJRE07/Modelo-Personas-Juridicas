@@ -1,0 +1,186 @@
+from pyspark.sql import SparkSession
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+from pyspark.ml.classification import GBTClassificationModel
+from pyspark.sql.functions import lit
+from pyspark.sql.functions import col
+ 
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+spark.conf.set("spark.sql.sources.default", "hive")
+spark.sql(f"USE sb_gf")
+ 
+
+#Definición variables a aplicar al modelo
+
+variables_diccionario={
+    # 1 #
+    'edad':{'Tipo':'Discretizada','J':[6,11,20]},
+    # 2 #
+    'cap_ahorro_total_actual':{'Tipo':'Discretizada','J':[-25757.80,-603.2,895]},
+    # 3 #
+    'ingresos_efectivo_actual':{'Tipo':'Discretizada','J':[0.35,1.5,15013.2]},
+    # 4 #
+    'var_gastos_consumo_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-0.030489,0,0.362517]},
+    # 5 #
+    'ingresos_financieros_promedio_trim_anterior':{'Tipo':'Discretizada','J':[0,52775.6316]},
+    # 6 #
+    'ingresos_duros_actual':{'Tipo':'Discretizada','J':[0.005,0.515]},
+    # 7 #
+    'vinc_saldos_nuevo':{'Tipo':'Discretizada','J':[11]},
+    # 8 #
+    'var_12m':{'Tipo':'Discretizada','J':[-0.3252352,0.161566]},
+    # 9 #
+    'variacion_saldo_semestral_num':{'Tipo':'Discretizada','J':[-0.33431,0.90601]},
+    # 10 #
+    'var_gastos_transferencia_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-0.404897,0.559974]},
+    # 11 #
+    'contador_sube':{'Tipo':'Discretizada','J':[0,6]},
+    # 12 #
+    'saldo_medio_actual':{'Tipo':'Discretizada','J':[9476.26,506423.59]},
+    # 13 #
+    'var_gastos_financieros_trim_actual_anterior':{'Tipo':'Discretizada','J':[-0.591534,0.339540]},
+    # 14 #
+    'var_cap_ahorro_dura_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-0.288628,0.432340]},
+    # 15 #
+    'ingreso_total_actual':{'Tipo':'Discretizada','J':[0.005,79650.605,2448015.4150]},
+    # 16 #
+    'gasto_total_actual':{'Tipo':'Discretizada','J':[-2248263.2250,-81804.67,-980.52]},
+    # 17 #
+    'variacion_saldo_trimestral_num':{'Tipo':'Discretizada','J':[-0.413110,0.561442]},
+    # 18 #
+    'variacion_saldo_12m_num':{'Tipo':'Discretizada','J':[-0.321538,1.20680]}
+}
+lista_variables=['nuevo_nivel_mod']
+for variable in variables_diccionario:
+    if variables_diccionario[variable]['Tipo']=='Discretizada':
+        lista_variables.append(f'{variable}_buckets')
+    else:
+        lista_variables.append(f'{variable}')
+
+print(f'LISTA VARIABLES: {lista_variables}')
+
+df_00_total_index=spark.sql('''SELECT * FROM sb_gf.ml_ready_reentrenamiento_simplai_2024_personas_juridicas_modelo_indexed_cortes_matematicos_19_variables''')
+
+
+#### PREPARACION TRAIN TEST ####
+df_00 = df_00_total_index.filter(
+    (col("fec_info") >= "202203") & (col("fec_info") <= "202210") &
+    ((col("riesgo_actual").isNull()) | (col("riesgo_actual") < 150000000)) &
+    ((col("saldo_medio_actual").isNull()) | (col("saldo_medio_actual") < 150000000)) &
+    ((col("ingreso_total_actual").isNull()) | (col("ingreso_total_actual") < 150000000)) &
+    ((col("gasto_total_actual").isNull()) | (col("gasto_total_actual") > -150000000))
+)
+df_01=df_00.na.fill(value = 0, subset = lista_variables)
+assemble_00 = VectorAssembler(inputCols = lista_variables, outputCol = 'features')
+df_02 = assemble_00.transform(df_01)
+
+#Separacion Train /Test para modelo
+df_train, df_test = df_02.randomSplit([0.80, 0.20], seed = 2)
+ 
+gbt_model_00 = GBTClassificationModel.load("/pro/workspace/gf/models/classification_pj_2024_cortes_matematicos_19_variables")
+ 
+#Obtencion kpis y metricas modelo train/test
+df_predictions_train = gbt_model_00.transform(df_train)
+df_predictions_test = gbt_model_00.transform(df_test)
+ 
+evaluator = BinaryClassificationEvaluator(labelCol = 'target', rawPredictionCol = 'probability')
+
+auc = evaluator.evaluate(df_predictions_train)
+aupr = evaluator.evaluate(df_predictions_train, {evaluator.metricName: "areaUnderPR"})
+tp = df_predictions_train[(df_predictions_train.target == 1) & (df_predictions_train.prediction == 1)].count()
+tn = df_predictions_train[(df_predictions_train.target == 0) & (df_predictions_train.prediction == 0)].count()
+fp = df_predictions_train[(df_predictions_train.target == 0) & (df_predictions_train.prediction == 1)].count()
+fn = df_predictions_train[(df_predictions_train.target == 1) & (df_predictions_train.prediction == 0)].count()
+ 
+metrics_train = [
+        ("True positive", float(tp)),
+        ("True negative", float(tn)),
+        ("False positive", float(fp)),
+        ("False negative", float(fn)),
+        ("Recall", float(tp) / (float(tp) + float(fn))),
+        ("Precision", float(tp) / (float(tp) + float(fp))),
+        ("AUC", auc),
+        ("AU Precision Recall", float(aupr))
+    ]
+df_predictions_train_modelo = spark.createDataFrame(metrics_train, ["Metric", f"Train"]).withColumn("Dataset", lit(f"Train"))
+ 
+df_combined=df_predictions_train_modelo
+   
+ 
+auc = evaluator.evaluate(df_predictions_test)
+aupr = evaluator.evaluate(df_predictions_test, {evaluator.metricName: "areaUnderPR"})
+tp = df_predictions_test[(df_predictions_test.target == 1) & (df_predictions_test.prediction == 1)].count()
+tn = df_predictions_test[(df_predictions_test.target == 0) & (df_predictions_test.prediction == 0)].count()
+fp = df_predictions_test[(df_predictions_test.target == 0) & (df_predictions_test.prediction == 1)].count()
+ 
+fn = df_predictions_test[(df_predictions_test.target == 1) & (df_predictions_test.prediction == 0)].count()
+   
+metrics_test = [
+        ("True positive", float(tp)),
+        ("True negative", float(tn)),
+        ("False positive", float(fp)),
+        ("False negative", float(fn)),
+        ("Recall", float(tp) / (float(tp) + float(fn))),
+        ("Precision", float(tp) / (float(tp) + float(fp))),
+        ("AUC", auc),
+        ("AU Precision Recall", float(aupr))
+    ]
+ 
+df_predictions_test_modelo = spark.createDataFrame(metrics_test, ["Metric", f"Test"]).withColumn("Dataset", lit(f"Test"))
+df_combined = df_combined.union(df_predictions_test_modelo)
+
+bandera=False
+
+for nuevo_nivel in range(5):
+    nuevo_nivel+=1
+    df_predictions_train_modelo=df_predictions_train.filter(col('nuevo_nivel_mod')==nuevo_nivel)
+    auc = evaluator.evaluate(df_predictions_train_modelo)
+    aupr = evaluator.evaluate(df_predictions_train_modelo, {evaluator.metricName: "areaUnderPR"})
+    tp = df_predictions_train_modelo[(df_predictions_train_modelo.target == 1) & (df_predictions_train_modelo.prediction == 1)].count()
+    tn = df_predictions_train_modelo[(df_predictions_train_modelo.target == 0) & (df_predictions_train_modelo.prediction == 0)].count()
+    fp = df_predictions_train_modelo[(df_predictions_train_modelo.target == 0) & (df_predictions_train_modelo.prediction == 1)].count()
+    fn = df_predictions_train_modelo[(df_predictions_train_modelo.target == 1) & (df_predictions_train_modelo.prediction == 0)].count()
+
+ 
+    metrics_train = [
+        ("True positive", float(tp)),
+        ("True negative", float(tn)),
+        ("False positive", float(fp)),
+        ("False negative", float(fn)),
+        ("Recall", float(tp) / (float(tp) + float(fn))),
+        ("Precision", float(tp) / (float(tp) + float(fp))),
+        ("AUC", auc),
+        ("AU Precision Recall", float(aupr))
+    ]
+    df_predictions_train_modelo = spark.createDataFrame(metrics_train, ["Metric", f"Train_{nuevo_nivel}"]).withColumn("Dataset", lit(f"Train_{nuevo_nivel}"))
+
+    if bandera:
+        df_combined=df_predictions_train_modelo
+    else:
+        df_combined=df_combined.union(df_predictions_train_modelo)
+    bandera=False
+
+    df_predictions_test_modelo=df_predictions_test.filter(col('nuevo_nivel_mod')==nuevo_nivel)
+    auc = evaluator.evaluate(df_predictions_test_modelo)
+    aupr = evaluator.evaluate(df_predictions_test_modelo, {evaluator.metricName: "areaUnderPR"})
+    tp = df_predictions_test_modelo[(df_predictions_test_modelo.target == 1) & (df_predictions_test_modelo.prediction == 1)].count()
+    tn = df_predictions_test_modelo[(df_predictions_test_modelo.target == 0) & (df_predictions_test_modelo.prediction == 0)].count()
+    fp = df_predictions_test_modelo[(df_predictions_test_modelo.target == 0) & (df_predictions_test_modelo.prediction == 1)].count()
+    fn = df_predictions_test_modelo[(df_predictions_test_modelo.target == 1) & (df_predictions_test_modelo.prediction == 0)].count()
+
+    
+    metrics_test = [
+        ("True positive", float(tp)),
+        ("True negative", float(tn)),
+        ("False positive", float(fp)),
+        ("False negative", float(fn)),
+        ("Recall", float(tp) / (float(tp) + float(fn))),
+        ("Precision", float(tp) / (float(tp) + float(fp))),
+        ("AUC", auc),
+        ("AU Precision Recall", float(aupr))
+    ]
+
+    df_predictions_test_modelo = spark.createDataFrame(metrics_test, ["Metric", f"Test_{nuevo_nivel}"]).withColumn("Dataset", lit(f"Test_{nuevo_nivel}"))
+    df_combined = df_combined.union(df_predictions_test_modelo)
+
+df_combined.write.mode('overwrite').saveAsTable('sb_gf.df_metricas_simplai_2024_estabilidad_personas_juridicas_train_test_cortes_matematicos_19_variables')
