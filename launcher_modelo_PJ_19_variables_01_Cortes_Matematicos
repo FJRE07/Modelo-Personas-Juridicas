@@ -1,0 +1,88 @@
+
+from pyspark.sql import SparkSession
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.classification import GBTClassifier
+from pyspark.sql.functions import col
+ 
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+spark.conf.set("spark.sql.sources.default", "hive")
+spark.sql(f"USE sb_gf")
+ 
+
+#Definición variables a aplicar al modelo
+
+variables_diccionario={
+    # 1 #
+    'edad':{'Tipo':'Discretizada','J':[6,11,20]},
+    # 2 #
+    'cap_ahorro_total_actual':{'Tipo':'Discretizada','J':[-25757.80,-603.2,895]},
+    # 3 #
+    'ingresos_efectivo_actual':{'Tipo':'Discretizada','J':[0.35,1.5,15013.2]},
+    # 4 #
+    'var_gastos_consumo_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-0.030489,0,0.362517]},
+    # 5 #
+    'ingresos_financieros_promedio_trim_anterior':{'Tipo':'Discretizada','J':[0,52775.6316]},
+    # 6 #
+    'ingresos_duros_actual':{'Tipo':'Discretizada','J':[0.005,0.515]},
+    # 7 #
+    'vinc_saldos_nuevo':{'Tipo':'Discretizada','J':[11]},
+    # 8 #
+    'var_12m':{'Tipo':'Discretizada','J':[-0.3252352,0.161566]},
+    # 9 #
+    'variacion_saldo_semestral_num':{'Tipo':'Discretizada','J':[-0.33431,0.90601]},
+    # 10 #
+    'var_gastos_transferencia_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-0.404897,0.559974]},
+    # 11 #
+    'contador_sube':{'Tipo':'Discretizada','J':[0,6]},
+    # 12 #
+    'saldo_medio_actual':{'Tipo':'Discretizada','J':[9476.26,506423.59]},
+    # 13 #
+    'var_gastos_financieros_trim_actual_anterior':{'Tipo':'Discretizada','J':[-0.591534,0.339540]},
+    # 14 #
+    'var_cap_ahorro_dura_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-0.288628,0.432340]},
+    # 15 #
+    'ingreso_total_actual':{'Tipo':'Discretizada','J':[0.005,79650.605,2448015.4150]},
+    # 16 #
+    'gasto_total_actual':{'Tipo':'Discretizada','J':[-2248263.2250,-81804.67,-980.52]},
+    # 17 #
+    'variacion_saldo_trimestral_num':{'Tipo':'Discretizada','J':[-0.413110,0.561442]},
+    # 18 #
+    'variacion_saldo_12m_num':{'Tipo':'Discretizada','J':[-0.321538,1.20680]}
+}
+lista_variables=['nuevo_nivel_mod']
+for variable in variables_diccionario:
+    if variables_diccionario[variable]['Tipo']=='Discretizada':
+        lista_variables.append(f'{variable}_buckets')
+    else:
+        lista_variables.append(f'{variable}')
+
+print(f'LISTA VARIABLES: {lista_variables}')
+
+df_00_total_index=spark.sql('''SELECT * FROM sb_gf.ml_ready_reentrenamiento_simplai_2024_personas_juridicas_modelo_indexed_cortes_matematicos_19_variables''')
+
+
+#### PREPARACION TRAIN TEST ####
+df_00 = df_00_total_index.filter(
+    (col("fec_info") >= "202203") & (col("fec_info") <= "202210") &
+    ((col("riesgo_actual").isNull()) | (col("riesgo_actual") < 150000000)) &
+    ((col("saldo_medio_actual").isNull()) | (col("saldo_medio_actual") < 150000000)) &
+    ((col("ingreso_total_actual").isNull()) | (col("ingreso_total_actual") < 150000000)) &
+    ((col("gasto_total_actual").isNull()) | (col("gasto_total_actual") > -150000000))
+)
+
+df_01=df_00.na.fill(value = 0, subset = lista_variables)
+assemble_00 = VectorAssembler(inputCols = lista_variables, outputCol = 'features')
+df_02 = assemble_00.transform(df_01)
+
+#Separacion Train /Test para modelo
+df_train, df_test = df_02.randomSplit([0.80, 0.20], seed = 2)
+ 
+#Entrenamiento del modelo
+dict_importancia = [{"id": index, "feat_name": feat, "fi": -1} for index, feat in enumerate(lista_variables)]
+gbt_algorithm = GBTClassifier(featuresCol = 'features', labelCol = 'target')
+gbt_model_00 = gbt_algorithm.fit(df_train)
+ 
+fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(spark._jsc.hadoopConfiguration())
+fs.delete(spark._jvm.org.apache.hadoop.fs.Path("/pro/workspace/gf/models/classification_pj_2024_cortes_matematicos_19_variables"), True)
+gbt_model_00.save("/pro/workspace/gf/models/classification_pj_2024_cortes_matematicos_19_variables")
+ 
