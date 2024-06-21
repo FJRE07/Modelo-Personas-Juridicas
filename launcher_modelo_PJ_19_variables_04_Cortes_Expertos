@@ -1,0 +1,173 @@
+from pyspark.sql import SparkSession
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+from pyspark.sql.functions import udf,percent_rank
+from pyspark.ml.classification import GBTClassificationModel
+from pyspark.sql.functions import lit
+from pyspark.sql.types import StringType, FloatType
+from pyspark.sql.functions import col
+ 
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+spark.conf.set("spark.sql.sources.default", "hive")
+spark.sql(f"USE sb_gf")
+ 
+
+
+#Definición variables a aplicar al modelo
+variables_diccionario={
+    # 1 #
+    'edad':{'Tipo':'Discretizada','J':[0,3,5,15]},
+    # 2 #
+    'cap_ahorro_total_actual':{'Tipo':'Discretizada','J':[-10000,0,50000]},
+    # 3 #
+    'ingresos_efectivo_actual':{'Tipo':'Discretizada','J':[6000]},
+    # 4 #
+    'var_gastos_consumo_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 5 #
+    'ingresos_financieros_promedio_trim_anterior':{'Tipo':'Discretizada','J':[30000]},
+    # 6 #
+    'ingresos_duros_actual':{'Tipo':'Discretizada','J':[100000]},
+    # 7 #
+    'vinc_saldos_nuevo':{'Tipo':'Discretizada','J':[11]},
+    # 8 #
+    'var_12m':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]},
+    # 9 #
+    'variacion_saldo_semestral_num':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]},
+    # 10 #
+    'var_gastos_transferencia_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 11 #
+    'contador_sube':{'Tipo':'Discretizada','J':[2,4,6,8]},
+    # 12 #
+    'saldo_medio_actual':{'Tipo':'Discretizada','J':[15000,50000,300000]},
+    # 13 #
+    'var_gastos_financieros_trim_actual_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 14 #
+    'var_cap_ahorro_dura_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 15 #
+    'ingreso_total_actual':{'Tipo':'Discretizada','J':[30000,300000,1500000]},
+    # 16 #
+    'gasto_total_actual':{'Tipo':'Discretizada','J':[-1500000,-300000,-30000]},
+    # 17 #
+    'variacion_saldo_trimestral_num':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]},
+    # 18 #
+    'variacion_saldo_12m_num':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]}
+}
+
+lista_variables=['nuevo_nivel_mod']
+for variable in variables_diccionario:
+    if variables_diccionario[variable]['Tipo']=='Discretizada':
+        lista_variables.append(f'{variable}_buckets')
+    else:
+        lista_variables.append(f'{variable}')
+
+print(f'LISTA VARIABLES: {lista_variables}')
+
+df_00_total=spark.sql('''SELECT * FROM sb_gf.ml_ready_reentrenamiento_simplai_2024_personas_juridicas_modelo_indexed_cortes_expertos_19_variables''')
+
+
+################### OUT OF TIME  ###################
+
+periodos=[['202201','202202'],
+          ['202211','202212'],
+          ['202301','202302']]
+
+to_array_function = udf(lambda v: v.toArray().tolist()[1], FloatType())
+
+gbt_model_pf_oot = GBTClassificationModel.load("/pro/workspace/gf/models/classification_pj_2024_cortes_expertos_19_variables")
+evaluator = BinaryClassificationEvaluator(labelCol = 'target', rawPredictionCol = 'probability')
+
+bandera=True
+for periodo in periodos:
+        for nuevo_nivel in range(5):
+            nuevo_nivel_auxiliar=nuevo_nivel+1
+
+            df_00_oot=df_00_total.filter((col("fec_info") >= periodo[0]) & (col("fec_info") <= periodo[1]) & (col("nuevo_nivel_mod") == nuevo_nivel_auxiliar))
+            df_01_oot=df_00_oot.na.fill(value = 0, subset = lista_variables)
+            assemble_00_oot = VectorAssembler(inputCols = lista_variables, outputCol = 'features')
+            df_02_oot = assemble_00_oot.transform(df_01_oot)
+
+            df_predictions_oot = gbt_model_pf_oot.transform(df_02_oot)
+
+            corte_A = spark.sql(f'''SELECT MAX(probability) FROM sb_gf.df_test_predictions_simplai_2024_personas_juridicas_estabilidad_clasificado_cortes_expertos_19_variables WHERE category="A" AND nuevo_nivel_mod={nuevo_nivel_auxiliar}''').collect()[0][0]
+            corte_B = spark.sql(f'''SELECT MAX(probability) FROM sb_gf.df_test_predictions_simplai_2024_personas_juridicas_estabilidad_clasificado_cortes_expertos_19_variables WHERE category="B" AND nuevo_nivel_mod={nuevo_nivel_auxiliar}''').collect()[0][0]
+            corte_C = spark.sql(f'''SELECT MAX(probability) FROM sb_gf.df_test_predictions_simplai_2024_personas_juridicas_estabilidad_clasificado_cortes_expertos_19_variables WHERE category="C" AND nuevo_nivel_mod={nuevo_nivel_auxiliar}''').collect()[0][0]
+
+
+            def rank_classification(val):
+                if val <= corte_A: return 'A'
+                elif val <= corte_B: return 'B'
+                elif val <= corte_C: return 'C'
+                else: return 'D'
+            rank_function = udf(lambda x: rank_classification(x), StringType())
+
+            evaluator_oot = BinaryClassificationEvaluator(labelCol = 'target', rawPredictionCol = 'probability')
+        
+            auc_oot = evaluator_oot.evaluate(df_predictions_oot)
+            aupr_oot = evaluator_oot.evaluate(df_predictions_oot, {evaluator.metricName: "areaUnderPR"})
+            tp_oot = df_predictions_oot[(df_predictions_oot.target == 1) & (df_predictions_oot.prediction == 1)].count()
+            tn_oot = df_predictions_oot[(df_predictions_oot.target == 0) & (df_predictions_oot.prediction == 0)].count()
+            fp_oot = df_predictions_oot[(df_predictions_oot.target == 0) & (df_predictions_oot.prediction == 1)].count()
+            fn_oot = df_predictions_oot[(df_predictions_oot.target == 1) & (df_predictions_oot.prediction == 0)].count()
+            
+    
+            metrics_oot = [
+                ("True positive", float(tp_oot)),
+                ("True negative", float(tn_oot)),
+                ("False positive", float(fp_oot)),
+                ("False negative", float(fn_oot)),
+                ("Recall", float(tp_oot) / (float(tp_oot) + float(fn_oot))),
+                ("Precision", float(tp_oot) / (float(tp_oot) + float(fp_oot))),
+                ("AUC", auc_oot),
+                ("AU Precision Recall", float(aupr_oot))
+            ]
+            df_metrics_oot = spark.createDataFrame(metrics_oot, ["Metric", f"OOT_{periodo[0]}_{periodo[1]}_{nuevo_nivel_auxiliar}"]).withColumn("Dataset", lit(f"OOT_{periodo[0]}_{periodo[1]}_{nuevo_nivel_auxiliar}"))
+
+            df_predictions_oot = df_predictions_oot.withColumn('probability', to_array_function('probability'))
+            df_predictions_oot = df_predictions_oot.withColumn('category', rank_function('probability'))
+
+
+            if bandera:
+                df_combined=df_metrics_oot
+                df_oot_predictions=df_predictions_oot
+            else:
+                df_combined=df_combined.union(df_metrics_oot)
+                df_oot_predictions=df_oot_predictions.union(df_predictions_oot)
+            bandera=False
+
+for periodo in periodos:
+
+            df_00_oot=df_00_total.filter((col("fec_info") >= periodo[0]) & (col("fec_info") <= periodo[1]))
+            df_01_oot=df_00_oot.na.fill(value = 0, subset = lista_variables)
+            assemble_00_oot = VectorAssembler(inputCols = lista_variables, outputCol = 'features')
+            df_02_oot = assemble_00_oot.transform(df_01_oot)
+
+            df_predictions_oot = gbt_model_pf_oot.transform(df_02_oot)
+            
+            evaluator_oot = BinaryClassificationEvaluator(labelCol = 'target', rawPredictionCol = 'probability')
+        
+            auc_oot = evaluator_oot.evaluate(df_predictions_oot)
+            aupr_oot = evaluator_oot.evaluate(df_predictions_oot, {evaluator.metricName: "areaUnderPR"})
+            tp_oot = df_predictions_oot[(df_predictions_oot.target == 1) & (df_predictions_oot.prediction == 1)].count()
+            tn_oot = df_predictions_oot[(df_predictions_oot.target == 0) & (df_predictions_oot.prediction == 0)].count()
+            fp_oot = df_predictions_oot[(df_predictions_oot.target == 0) & (df_predictions_oot.prediction == 1)].count()
+            fn_oot = df_predictions_oot[(df_predictions_oot.target == 1) & (df_predictions_oot.prediction == 0)].count()
+    
+            metrics_oot = [
+                ("True positive", float(tp_oot)),
+                ("True negative", float(tn_oot)),
+                ("False positive", float(fp_oot)),
+                ("False negative", float(fn_oot)),
+                ("Recall", float(tp_oot) / (float(tp_oot) + float(fn_oot))),
+                ("Precision", float(tp_oot) / (float(tp_oot) + float(fp_oot))),
+                ("AUC", auc_oot),
+                ("AU Precision Recall", float(aupr_oot))
+            ]
+            df_metrics_oot = spark.createDataFrame(metrics_oot, ["Metric", f"OOT_{periodo[0]}_{periodo[1]}"]).withColumn("Dataset", lit(f"OOT_{periodo[0]}_{periodo[1]}"))
+            df_combined=df_combined.union(df_metrics_oot)
+
+
+
+df_combined.write.mode('overwrite').saveAsTable('sb_gf.df_metricas_simplai_2024_personas_juridicas_estabilidad_oot_cortes_expertos_19_variables')
+df_oot_predictions.write.mode('overwrite').saveAsTable('sb_gf.df_oot_predictions_simplai_2024_personas_juridicas_estabilidad_clasificado_cortes_expertos_19_variables')
+
+
