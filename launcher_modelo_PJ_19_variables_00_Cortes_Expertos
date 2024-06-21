@@ -1,0 +1,127 @@
+#Codigo Modeler
+# Modelo PF - estabilidad
+ 
+ 
+#Librerias
+from pyspark.sql import SparkSession
+ 
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+spark.conf.set("spark.sql.sources.default", "hive")
+spark.sql(f"USE sb_gf")
+ 
+#Funciones auxiliares
+def generar_consulta_rangos(diccionario, variable,cod_tip_persona):
+    consulta_sql = f"CASE\n"
+    rangos=diccionario[variable][cod_tip_persona]
+    contador=0
+    for limite in range(len(rangos)+1):
+        bound = rangos[limite-1]    
+        if limite == len(rangos):
+            consulta_sql += f"  WHEN {variable} <= {bound}  THEN {contador}\n"
+            contador+=1
+            consulta_sql += f"  WHEN {variable} > {bound} THEN {contador}\n"
+        elif limite==0:
+            consulta_sql += f"  WHEN {variable} IS NULL THEN {contador}\n"
+
+        elif limite==1:
+            consulta_sql += f"  WHEN {variable} <= {bound} THEN {contador}\n"
+        else:
+            consulta_sql += f"  WHEN {variable} <= {bound}  THEN {contador}\n"
+        contador+=1
+    consulta_sql += f"END AS {variable}_buckets"                  
+   
+    return consulta_sql
+
+#Definición variables a aplicar al modelo
+variables_diccionario={
+    # 1 #
+    'edad':{'Tipo':'Discretizada','J':[0,3,5,15]},
+    # 2 #
+    'cap_ahorro_total_actual':{'Tipo':'Discretizada','J':[-10000,0,50000]},
+    # 3 #
+    'ingresos_efectivo_actual':{'Tipo':'Discretizada','J':[6000]},
+    # 4 #
+    'var_gastos_consumo_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 5 #
+    'ingresos_financieros_promedio_trim_anterior':{'Tipo':'Discretizada','J':[30000]},
+    # 6 #
+    'ingresos_duros_actual':{'Tipo':'Discretizada','J':[100000]},
+    # 7 #
+    'vinc_saldos_nuevo':{'Tipo':'Discretizada','J':[11]},
+    # 8 #
+    'var_12m':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]},
+    # 9 #
+    'variacion_saldo_semestral_num':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]},
+    # 10 #
+    'var_gastos_transferencia_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 11 #
+    'contador_sube':{'Tipo':'Discretizada','J':[2,4,6,8]},
+    # 12 #
+    'saldo_medio_actual':{'Tipo':'Discretizada','J':[15000,50000,300000]},
+    # 13 #
+    'var_gastos_financieros_trim_actual_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 14 #
+    'var_cap_ahorro_dura_mes_actual_trim_anterior':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1]},
+    # 15 #
+    'ingreso_total_actual':{'Tipo':'Discretizada','J':[30000,300000,1500000]},
+    # 16 #
+    'gasto_total_actual':{'Tipo':'Discretizada','J':[-1500000,-300000,-30000]},
+    # 17 #
+    'variacion_saldo_trimestral_num':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]},
+    # 18 #
+    'variacion_saldo_12m_num':{'Tipo':'Discretizada','J':[-1,-.5,-.2,0,.2,.5,1,2]}
+}
+
+##### CREACION BASE TRAIN TEST ####
+
+spark.sql(f"DROP TABLE IF EXISTS sb_gf.ml_ready_reentrenamiento_simplai_2024_personas_juridicas_modelo_indexed_cortes_expertos_19_variables")
+consulta_completa=f'''CREATE TABLE sb_gf.ml_ready_reentrenamiento_simplai_2024_personas_juridicas_modelo_indexed_cortes_expertos_19_variables AS
+SELECT
+buc_cliente,
+fec_info,
+flag_opcion_3_12_meses as target,
+cod_tip_persona,
+modelo_atencion_nuevo,
+riesgo_actual,
+saldo_medio_actual,
+ingreso_total_actual,
+gasto_total_actual,
+id_activo_personas_juridicas,
+CASE 
+    WHEN nuevo_nivel="WEALTH MANAGEMENT" THEN 1
+    WHEN nuevo_nivel="GLOBAL TRANSACTION BANKING" THEN 2
+    WHEN nuevo_nivel="EMPRESAS" THEN 3
+    WHEN nuevo_nivel="PYMES" THEN 4
+    WHEN nuevo_nivel="INSTITUCIONES" THEN 5
+    ELSE 6
+END AS nuevo_nivel_mod,
+'''
+contador_variables_len=len(list(variables_diccionario.keys()))
+contador=0
+for variable in variables_diccionario:
+    contador+=1
+    tipo=variables_diccionario[variable]["Tipo"]
+    if contador==contador_variables_len:
+        if tipo=="Continua":
+            consulta_completa+=f"{variable}\n"
+        elif tipo=="Discretizada":
+            consulta_variable=generar_consulta_rangos(variables_diccionario,variable,"J")
+            consulta_completa+=f"{consulta_variable}"
+    else:
+        if tipo=="Continua":
+            consulta_completa+=f"{variable},\n"
+        elif tipo=="Discretizada":
+            consulta_variable=generar_consulta_rangos(variables_diccionario,variable,"J")
+            consulta_completa+=f"{consulta_variable},\n"
+ 
+consulta_completa+=f" FROM sb_gf.ml_ready_reentrenamiento_simplai_2024_vf_10_personas_juridicas\n"
+consulta_completa+=f" WHERE cod_tip_persona='J' AND fec_info >=202201 AND fec_info<=202302 AND (id_activo_personas_juridicas=1 OR id_activo_personas_juridicas IS NULL ) \n"
+spark.sql(consulta_completa)
+
+print(consulta_completa)
+print("CONSULTA SIMPLAI MODELO PERSONAS JURIDICAS")
+
+
+
+
+
