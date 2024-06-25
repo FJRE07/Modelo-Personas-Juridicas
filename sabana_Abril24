@@ -1,0 +1,17 @@
+from pyspark.sql import SparkSession
+from pyspark.sql import Row
+ 
+ 
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+file_path = "/pro/workspace/gf/sabana_Abril24.txt"  
+ 
+lines_rdd = spark.sparkContext.textFile(file_path)
+ 
+header = lines_rdd.first()
+data_rdd = lines_rdd.filter(lambda row: row != header)
+ 
+columns = header.split('\t')  
+renamed_columns = [col.replace("(", "").replace(")", "").replace(",", "").replace(" ", "_").replace("=", "").replace("NVL_", "") for col in columns]
+rows_rdd = data_rdd.map(lambda line: Row(*line.split('\t')))
+df = spark.createDataFrame(rows_rdd, schema=renamed_columns)
+df.write.mode('overwrite').saveAsTable("sb_gf.tabla_clientes_inactivos_personas_juridicas_abril_2024")
