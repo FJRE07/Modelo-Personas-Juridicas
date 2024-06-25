@@ -1,0 +1,10 @@
+CREATE TABLE sb_gf.cat_grupos_gesfin_simplai AS 
+SELECT 
+	*
+FROM (
+    SELECT 
+        *,
+ROW_NUMBER() OVER (PARTITION BY cve_cliente ORDER BY fyh_carga_datos DESC) AS rn
+    FROM dm_gf.cat_grupos_gesfin
+) AS sub
+WHERE rn = 1
