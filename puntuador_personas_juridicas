@@ -1,0 +1,1669 @@
+################################################################################
+from pyspark.sql import SparkSession
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.classification import GBTClassificationModel
+from pyspark.sql.functions import col, when,  udf
+from pyspark.sql.types import FloatType, StringType
+from pyspark.sql import functions as F
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+def getShowString(df, n=20, truncate=True, vertical=False):
+        if isinstance(truncate, bool) and truncate:
+                return(df._jdf.showString(n, 20, vertical))
+        else:
+                return(df._jdf.showString(n, int(truncate), vertical))
+
+def logger(fs, log_string, log_file):
+        fs.delete(spark._jvm.org.apache.hadoop.fs.Path("/pro/workspace/gf/logs/" + log_file), True)
+
+spark = SparkSession.builder.enableHiveSupport().getOrCreate()
+spark.sql("USE sb_gf")
+fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(spark._jsc.hadoopConfiguration())
+
+
+################################### PUNTUACIÓN MENSUAL DE LOS MODELOS DE ESTABILIDAD  ##########################################
+################################################################################################################################
+
+################################################ INSTRUCCIONES DE USO ##########################################################
+################################################################################################################################
+
+'''
+Instrucciones de utilización:
+    1. Seleccionar mes con "fec_info_input"
+    2. Ejecutar códigos
+'''
+############################################# PARAMETRIZACIÓN DEL CÓDIGO #######################################################
+################################################################################################################################
+
+fec_info_input=202401
+'''
+    Consideraciones sobre el input "fec_info_input":
+
+    1. Fecha mensual seleccionada sobre la que se evalúa y actualiza la BBDD MAESTRA HISTÓRICA
+    2. Fecha mensual seleccionada sobre la que se generan todas las variables históricas comportamentales y sintéticas
+    3. Fecha mensual seleccionada sobre la que se generan las predicciones de los modelos
+'''
+
+subfix_param = '_puntuador_personas_juridicas' 
+''' Parámetro opcional para proporcionar un sufijo adicional a las tablas '''
+
+nueva_base= False
+''' Parámetro opcional para crear una nueva base maestra histórica '''
+    
+table_subfix = str(fec_info_input) + subfix_param 
+''' Sufijo generado para todas las tablas intermedias '''
+
+    ################################################################################################################################
+    ################################################################################################################################
+    ## 1. Generación de datos mensuales y consolidación en la Base de Datos Maestra Histórica ##
+    ## Proceso para la evaluación de la BBDD MAESTRA HISTÓRICA y  generación de los datos mensuales desde el origen de las tablas ##
+    ## Funciones que realizan el proceso de actualizar los meses necesarios que se añaden a la BBDD maestra histórica ##
+
+def meses_necesarios(yyyymm, num_meses=25):
+        '''Función que regresa meses pasados con base al mes en obversación y el número de meses deseados
+        Ejemplo:
+        meses_necesarios("202301",4)
+        Resultado ['202301','202212','202211','202210']
+        '''           
+        fecha_inicial = datetime.strptime(yyyymm, "%Y%m") 
+        meses = [(fecha_inicial - relativedelta(months=i)).strftime("%Y%m") for i in range(num_meses)]
+        return meses 
+
+def get_months_to_update(fec_info_input):
+            '''Función que toma como argumento el valor de fec_info (mes de la bbdd). El resultado es el número de meses que se han de extraer y generar en la BBDD 
+            MAESTRA HISTÓRICA hasta el mes aportado desde el parámetro fec_info para consolidar en la bbdd histórica completa.
+            
+            Es importante que la BBDD maestra histórica tenga mínimo 24 meses para generar todos los indicadores, por lo tanto se realizará 
+            un check de esta condición por si es necesario reconstruir la BBDD maestra histórica completa
+            '''
+            try:
+                df = spark.sql(' SELECT DISTINCT fec_info FROM sb_gf.bbdd_maestra_historica_personas_juridicas ORDER BY fec_info DESC ')
+                month_list = df.rdd.map(lambda x: x.fec_info).collect()
+                lista_meses_necesarios = meses_necesarios(str(fec_info_input))
+                meses_faltantes=[float(mes) for mes in lista_meses_necesarios if float(mes) not in month_list]
+                n_meses_faltantes=len(meses_faltantes)
+            except:
+                n_meses_faltantes=24
+                meses_faltantes=meses_necesarios(str(fec_info_input))
+            return n_meses_faltantes,meses_faltantes
+
+    ################################################################################################################################
+    ################################################################################################################################
+
+    ## Proceso que general la BBDD "mensual "maestra para el mes elegido ##
+def get_month_data(table_subfix, fec_info,nueva_base=False):
+        
+        '''
+        Esta función nos permite generar la bbdd mensual maestra para el mes elegido
+        
+            A. La función tiene el 1er argumento como table_subfix siendo este el el sufijo de 
+            los nombres de las tablas intermedias y finales generadas en todo el proceso
+
+            B. La función tiene el 2º argumento como fec_info que corresponde al mes en el que 
+            se va a ejecutar la bbdd mensual
+
+            C. El resultado final de la función es la generación de la bbdd mensual:
+            tabla_intermedia_master_04_' + table_subfix
+        '''
+        ############################################################################################################################
+        ############################################################################################################################
+
+        ## 1. Creación de la tabla de captación ##
+        ## 1.1 Generación de la primera tabla intermedia de captación desde el origen de la tabla de captación ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_00_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.tabla_intermedia_capta_00_{table_subfix} AS 
+                SELECT 
+                    num_cuenta,
+                    buc_cliente,
+                    fec_data,
+                    cod_sector_contable,
+                    ROUND(fec_data/100, 0) AS fec_info,
+                    buc_cliente as idf_pers_ods,
+                    cod_tip_persona,
+                    codigoareanegocio,
+                    imp_sdo_med_cap_ml,
+                    CASE WHEN tipo_plazo = "VISTA" THEN imp_sdo_med_cap_ml ELSE 0 END AS imp_sdo_med_cap_tipo_vista,
+                    CASE WHEN tipo_plazo = "PLAZO" THEN imp_sdo_med_cap_ml ELSE 0 END AS imp_sdo_med_cap_tipo_plazo
+                FROM 
+                    sb_gf.captacion
+                WHERE 
+                    ROUND(fec_data/100, 0) = {fec_info}''')
+
+        ## 1.2 Generación de la 2ª tabla intermedia de captación para realizar la agregación a nivel cliente ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_01_{table_subfix}') 
+        spark.sql(f'''CREATE TABLE sb_gf.tabla_intermedia_capta_01_{table_subfix} AS 
+                SELECT 
+                    fec_info,
+                    buc_cliente as idf_pers_ods,
+                    buc_cliente,
+                    cod_tip_persona,
+                    cod_sector_contable,
+                    codigoareanegocio,
+                    SUM(imp_sdo_med_cap_ml) as total_saldo_medio,
+                    SUM(imp_sdo_med_cap_tipo_plazo) AS saldo_medio_plazo,
+                    SUM(imp_sdo_med_cap_tipo_vista) AS saldo_medio_vista
+                FROM 
+                    sb_gf.tabla_intermedia_capta_00_{table_subfix}
+                GROUP BY 
+                    fec_info, buc_cliente, cod_tip_persona, cod_sector_contable, codigoareanegocio''')
+
+        ## 1.3 Generación de la 3ª tabla intermedia de captación: Identificación de duplicados ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_02_{table_subfix}') 
+        spark.sql(f'''CREATE TABLE sb_gf.tabla_intermedia_capta_02_{table_subfix} AS 
+                SELECT 
+                    fec_info,
+                    buc_cliente,
+                    COUNT(buc_cliente) as N
+                FROM 
+                    sb_gf.tabla_intermedia_capta_01_{table_subfix}
+                GROUP BY 
+                    fec_info, buc_cliente''')
+
+        ## 1.4 Generación de la 4ª tabla intermedia de captación: Marcas de duplicados ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_03_{table_subfix}') 
+        spark.sql(f'''CREATE TABLE sb_gf.tabla_intermedia_capta_03_{table_subfix} AS 
+                SELECT 
+                    a.*, 
+                    b.N 
+                FROM 
+                    sb_gf.tabla_intermedia_capta_01_{table_subfix} AS a 
+                LEFT JOIN 
+                    sb_gf.tabla_intermedia_capta_02_{table_subfix} AS b 
+                ON 
+                    (a.fec_info = b.fec_info) AND (a.buc_cliente = b.buc_cliente)''')
+
+        ## 1.5 Generación de la 5ª tabla intermedia de captación: Marcas de duplicados ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_04_{table_subfix}') 
+        spark.sql(f'''CREATE TABLE sb_gf.tabla_intermedia_capta_04_{table_subfix} AS 
+                SELECT 
+                    *
+                FROM 
+                    sb_gf.tabla_intermedia_capta_03_{table_subfix} 
+                WHERE 
+                    N = 1''')
+
+        ## 1.6 Elimininación de las tablas intermedias previas ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_00_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_01_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_02_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_03_{table_subfix}')
+
+        ############################################################################################################################
+        ############################################################################################################################
+
+        ## 2. Creación de la tabla de personas ##
+        ## 2.1 Generación de la tabla de personas a nivel cliente con la última fecha de partición de datos ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_cliente_00_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.tabla_intermedia_cliente_00_{table_subfix} AS 
+                SELECT 
+                    cve_cliente,
+                    fec_nacimiento
+                FROM sb_gf.mst_datos_basicos_cliente ''') 
+
+        ############################################################################################################################
+        ############################################################################################################################
+
+        ## 3. Generación de la tabla mensual maestra ##
+        ## 3.1 Cruce de la base de captación e información básica del cliente ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_master_00_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.tabla_intermedia_master_00_{table_subfix} AS 
+                SELECT 
+                    a.fec_info, 
+                    a.idf_pers_ods, 
+                    a.buc_cliente, 
+                    a.cod_tip_persona, 
+                    a.codigoareanegocio, 
+                    a.total_saldo_medio, 
+                    a.saldo_medio_plazo,
+                    a.saldo_medio_vista,
+                    b.fec_nacimiento 
+                FROM 
+                    sb_gf.tabla_intermedia_capta_04_{table_subfix} AS a 
+                LEFT JOIN 
+                    sb_gf.tabla_intermedia_cliente_00_{table_subfix} AS b 
+                ON 
+                    a.buc_cliente = b.cve_cliente ''')
+
+        ## 3.2 Cruce con la base de área de negocio ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_master_01_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.tabla_intermedia_master_01_{table_subfix} AS 
+                SELECT 
+                    a.*, 
+                    d.nuevo_nivel 
+                FROM 
+                    sb_gf.tabla_intermedia_master_00_{table_subfix} AS a 
+                LEFT JOIN 
+                    sb_gf.cat_areanegocio_simplai AS d 
+                ON 
+                    a.codigoareanegocio = d.cod_adn''')
+
+        ## 3.3 Creación de indicador fecha en formato DATE ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_master_02_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.tabla_intermedia_master_02_{table_subfix} AS 
+                SELECT 
+                    TO_DATE(CONCAT(SUBSTRING(fec_info, 1, 4), '-', SUBSTRING(fec_info, 5, 2), '-01')) AS fecha,
+                    * 
+                FROM sb_gf.tabla_intermedia_master_01_{table_subfix}''')
+        
+        ## 3.4 Elimininación de las tablas intermedias previas ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_capta_04_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_cliente_00_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_master_00_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_master_01_{table_subfix}')
+
+        ############################################################################################################################
+        ############################################################################################################################
+
+        ## 4. Generación/Inserción a la tabla maestra histórica ##
+        if nueva_base:
+            spark.sql('DROP TABLE IF EXISTS sb_gf.bbdd_maestra_historica_personas_juridicas')
+            spark.sql(f'''CREATE TABLE sb_gf.bbdd_maestra_historica_personas_juridicas AS 
+                      SELECT 
+                        fec_info,
+                        fecha,
+                        idf_pers_ods,
+                        buc_cliente,
+                        cod_tip_persona,
+                        codigoareanegocio,
+                        total_saldo_medio,
+                        saldo_medio_plazo,
+                        saldo_medio_vista,
+                        fec_nacimiento,
+                        nuevo_nivel
+                      FROM sb_gf.tabla_intermedia_master_02_{table_subfix}
+                        WHERE cod_tip_persona="J" ''')
+        else:
+            spark.sql(f'''INSERT INTO TABLE sb_gf.bbdd_maestra_historica_personas_juridicas
+                      SELECT
+                        fec_info,
+                        fecha,
+                        idf_pers_ods,
+                        buc_cliente,
+                        cod_tip_persona,
+                        codigoareanegocio,
+                        total_saldo_medio,
+                        saldo_medio_plazo,
+                        saldo_medio_vista,
+                        fec_nacimiento,
+                        nuevo_nivel 
+                      FROM sb_gf.tabla_intermedia_master_02_{table_subfix} 
+                        WHERE cod_tip_persona="J"''')
+            
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.tabla_intermedia_master_02_{table_subfix}')
+            
+    ################################################################################################################################
+    ################################################################################################################################
+
+    ## Iteración para actualizar la base maestra histórica con base al mes de observación ##
+
+def get_update_bbdd(n_months_update, months_update,nueva_base):
+            if nueva_base:
+                meses_completos=meses_necesarios(str(fec_info_input),num_meses=25)
+                table_subfixes_update = [str(month)[:6] + subfix_param for month in meses_completos]
+                for month, table_subfix in zip(meses_completos, table_subfixes_update):
+                    if nueva_base:
+                        get_month_data(table_subfix, month,nueva_base)
+                        nueva_base=False
+                    else:
+                        get_month_data(table_subfix, month,nueva_base)        
+            else:
+                table_subfixes_update = [str(month)[:6] + subfix_param for month in months_update]
+                if n_months_update != 0 or len(months_update) != 0:
+                    for month, table_subfix in zip(months_update, table_subfixes_update):
+                        get_month_data(table_subfix, month,nueva_base=False)
+                else:
+                    print(' ############################################### ')
+                    print(''' LA BASE CONTIENE TODOS LOS MESES NECESARIOS ''')
+                    print(' ############################################### ')
+                
+
+n_months_update, months_update = get_months_to_update(fec_info_input)
+print('n_months_update',n_months_update)
+print('months_update',months_update)
+get_update_bbdd(n_months_update,months_update,nueva_base=False)
+
+    ############################################################################################################################
+    ############################################################################################################################
+
+    # 2. INGENIERÍA DE DATOS Y GENERACIÓN DE VARIABLES HISTÓRICAS: Generación de ML READY de los modelos
+
+def subtract_months(date, months):
+        # Calcula el número total de años y meses a restar
+        years_to_subtract = months // 12
+        months_to_subtract = months % 12
+
+        # Resta años y meses
+        new_year = date.year - years_to_subtract
+        new_month = date.month - months_to_subtract
+
+        # Ajusta si es necesario
+        if new_month <= 0:
+            new_year -= 1
+            new_month += 12
+
+        # Calcula la nueva fecha
+        new_date = date.replace(year=new_year, month=new_month)
+
+        return new_date
+
+def add_months(date, months):
+        # Calcula el número total de años y meses a sumar
+        years_to_add = months // 12
+        months_to_add = months % 12
+
+        # Suma años y meses
+        new_year = date.year + years_to_add
+        new_month = date.month + months_to_add
+
+        # Ajusta si es necesario
+        if new_month > 12:
+            new_year += 1
+            new_month -= 12
+
+        # Calcula la nueva fecha
+        new_date = date.replace(year=new_year, month=new_month)
+
+        return new_date
+
+
+def generar_tupla_fechas(fec_inicio, fec_fin):
+        # Inicializar la lista para almacenar las fechas y los formatos AAAAMM
+        tupla_fechas = []
+
+        # Agregar la fecha inicial a la lista
+        tupla_fechas.append(fec_inicio)
+
+        # Inicializar la fecha actual
+        fecha_actual = fec_inicio
+
+        # Incrementar la fecha actual mes a mes hasta llegar a la fecha final
+        while fecha_actual < fec_fin:
+            # Calcular el próximo mes
+            next_month = fecha_actual.month + 1
+            next_year = fecha_actual.year
+
+            # Ajustar el año si el próximo mes es enero (1)
+            if next_month == 13:
+                next_month = 1
+                next_year += 1
+
+            # Crear la nueva fecha
+            fecha_actual = datetime(next_year, next_month, 1)
+
+            # Asegurarse de que la fecha actual no supere la fecha final
+            if fecha_actual > fec_fin:
+                fecha_actual = fec_fin
+
+            # Agregar la fecha actual a la lista
+            tupla_fechas.append(fecha_actual)
+
+        return tupla_fechas
+
+
+def ml_ready_table(table_subfix, fec_info_input):
+
+        ############################################################################################################################
+        ############################################################################################################################
+
+        ## 1.Creación de ventanas temporales ##
+        '''
+        Creación de ventanas temporales para el cálculo de indicadores históricos
+        Se construyen las siguientes periodos de tiempo
+        1. 12 meses anteriores al mes de observación
+        2. 6 meses anteriores al mes de observación
+        3. 3 meses anteriores al mes de observación
+        4. 12 meses anteriores del año previo al mes de observación
+        5. 6 meses anteriores del año previo al mes de observación
+        6. 3 meses anteriores  del año previo al mes de observación
+        7. Semestre anterior
+        8. Trimestra anterior 
+        '''
+        fec_info_input_date = datetime(int(str(fec_info_input)[:4]), int(str(fec_info_input)[4:]), 1)
+        
+        fec_info_13m = fec_info_input_date.replace(year=fec_info_input_date.year - 1)
+        fec_info_12m = subtract_months(fec_info_input_date, 11)
+        fec_info_6m =  subtract_months(fec_info_input_date, 5)
+        fec_info_3m =  subtract_months(fec_info_input_date, 2)
+        fec_info_12m_pasado = subtract_months(fec_info_input_date, 23)
+        fec_info_6m_pasado =  subtract_months(fec_info_input_date, 17)
+        fec_info_3m_pasado =  subtract_months(fec_info_input_date, 14)
+
+        tuple_13m = generar_tupla_fechas(fec_info_13m, fec_info_input_date)
+        tuple_12m = generar_tupla_fechas(fec_info_12m, fec_info_input_date)
+        tuple_6m = generar_tupla_fechas(fec_info_6m, fec_info_input_date)
+        tuple_3m = generar_tupla_fechas(fec_info_3m, fec_info_input_date)
+        tuple_12m_pasado = generar_tupla_fechas(fec_info_12m_pasado, fec_info_13m)
+        tuple_6m_pasado = generar_tupla_fechas(fec_info_6m_pasado, fec_info_13m)
+        tuple_3m_pasado = generar_tupla_fechas(fec_info_3m_pasado, fec_info_13m)
+
+        fecha_strings_3m = [fecha.strftime('%Y-%m-%d') for fecha in tuple_3m]
+        fecha_lista_3m = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_3m]) + ")"
+
+        fecha_strings_3mp = [fecha.strftime('%Y-%m-%d') for fecha in tuple_3m_pasado]
+        fecha_lista_3mp = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_3mp]) + ")"
+
+        fecha_strings_6m = [fecha.strftime('%Y-%m-%d') for fecha in tuple_6m]
+        fecha_lista_6m = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_6m]) + ")"
+
+        fecha_strings_6mp = [fecha.strftime('%Y-%m-%d') for fecha in tuple_6m_pasado]
+        fecha_lista_6mp = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_6mp]) + ")"
+        
+        fecha_strings_6m_2 = [fecha.strftime('%Y-%m-%d') for fecha in tuple_6m[:3]]
+        fecha_lista_6m_2 = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_6m_2]) + ")"
+
+        fecha_strings_12m = [fecha.strftime('%Y-%m-%d') for fecha in tuple_12m]
+        fecha_lista_12m = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_12m]) + ")"
+
+        fecha_strings_12m2 = [fecha.strftime('%Y-%m-%d') for fecha in tuple_12m]
+        fecha_lista_12m2 = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_12m2]) + ")"
+
+        fecha_strings_12mp = [fecha.strftime('%Y-%m-%d') for fecha in tuple_12m_pasado]
+        fecha_lista_12mp = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_12mp]) + ")"
+
+        fecha_strings_12m_2 = [fecha.strftime('%Y-%m-%d') for fecha in tuple_12m[:6]]
+        fecha_lista_12m_2 = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_12m_2]) + ")"
+
+        fecha_strings_13m = [fecha.strftime('%Y-%m-%d') for fecha in tuple_13m]
+        fecha_lista_13m = "(" + ", ".join(["'{}'".format(fecha_str) for fecha_str in fecha_strings_13m]) + ")"
+
+        ############################################################################################################################
+        ############################################################################################################################
+
+        ## 2. Variables históricas agrupadas en los último 12,6 y 3 meses ##
+        ## 2.1. Generacion de la agregacion de historico 12M ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_12m_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_historicas_12m_{table_subfix} AS 
+                SELECT 
+                    buc_cliente, 
+                    AVG(total_saldo_medio) AS saldo_medio_12m 
+                FROM 
+                    sb_gf.bbdd_maestra_historica_personas_juridicas 
+                WHERE
+                    fecha IN {fecha_lista_12m} 
+                GROUP BY 
+                    buc_cliente ''')
+        
+        ## 2.2. Generacion de la agregacion de historico 6M ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_6M_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_historicas_6M_{table_subfix} AS 
+                SELECT 
+                    buc_cliente, 
+                    AVG(total_saldo_medio) AS saldo_medio_6m 
+                FROM 
+                    sb_gf.bbdd_maestra_historica_personas_juridicas 
+                WHERE 
+                    fecha IN {fecha_lista_6m}
+                GROUP BY 
+                    buc_cliente ''')
+        
+        ## 2.3. Generacion de la agregacion de historico 3M ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_3M_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_historicas_3M_{table_subfix} AS 
+                SELECT 
+                    buc_cliente, 
+                    AVG(total_saldo_medio) AS saldo_medio_3m 
+                FROM 
+                    sb_gf.bbdd_maestra_historica_personas_juridicas 
+                WHERE 
+                    fecha IN {fecha_lista_3m} 
+                GROUP BY 
+                    buc_cliente ''')
+        
+        ############################################################################################################################
+        ############################################################################################################################
+
+        ## 3. Creacion variables saldo pasado ##
+        ## 3.1. Creacion de variables saldo historico a pasado 3M ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_pasado3m_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_saldo_pasado3m_{table_subfix} AS 
+                SELECT 
+                    buc_cliente, 
+                    SUM(total_saldo_medio)/3 AS saldo_medio_pasado_3m 
+                FROM 
+                    sb_gf.bbdd_maestra_historica_personas_juridicas 
+                WHERE 
+                    fecha IN {fecha_lista_3mp} 
+                GROUP BY 
+                    buc_cliente''')
+
+        ## 3.2. Creacion de variables saldo historicas pasado 6M ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_pasado6m_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_saldo_pasado6m_{table_subfix} AS 
+                SELECT 
+                    buc_cliente, 
+                    SUM(total_saldo_medio)/6 AS saldo_medio_pasado_6m 
+                FROM 
+                    sb_gf.bbdd_maestra_historica_personas_juridicas 
+                WHERE 
+                    fecha IN {fecha_lista_6mp}
+                GROUP BY 
+                    buc_cliente''')
+
+        ## 3.3. Creacion de variables saldo historico pasado 12M ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_pasado12m_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_saldo_pasado12m_{table_subfix} AS 
+                SELECT 
+                    buc_cliente, 
+                    SUM(total_saldo_medio)/12 AS saldo_medio_pasado_12m 
+                FROM 
+                    sb_gf.bbdd_maestra_historica_personas_juridicas 
+                WHERE 
+                    fecha IN {fecha_lista_12mp} 
+                GROUP BY 
+                    buc_cliente ''')
+
+        ## 3.4. Creacion de variables saldo historico TRIMESTRAL pasado 3M ## 
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_trimestral_pasado3m_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_saldo_trimestral_pasado3m_{table_subfix} AS 
+                SELECT 
+                    buc_cliente,
+                    SUM(total_saldo_medio)/3 AS saldo_medio_trim_pasado_3m 
+                FROM 
+                    sb_gf.bbdd_maestra_historica_personas_juridicas 
+                WHERE 
+                    fecha IN {fecha_lista_6m_2}
+                GROUP BY 
+                    buc_cliente''')
+
+        ## 3.5. Creacion de variables saldo historico SEMESTRAL pasado 6M ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_semestral_pasado6m_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_saldo_semestral_pasado6m_{table_subfix} AS 
+                SELECT 
+                    buc_cliente,
+                    SUM(total_saldo_medio)/6 AS saldo_medio_sem_pasado_6m
+                FROM 
+                    sb_gf.bbdd_maestra_historica_personas_juridicas
+                WHERE  
+                    fecha IN {fecha_lista_12m_2} 
+                GROUP BY 
+                    buc_cliente ''')
+
+        ## 3.6  Creacion de variables de cliente y saldo en fec_info (Punto de observacion) ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_cliente_saldo_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_cliente_saldo_{table_subfix} AS 
+                SELECT 
+                    buc_cliente,
+                    cod_tip_persona,
+                    floor(datediff(fecha,fec_nacimiento)/365)as edad,
+                    nuevo_nivel,
+                    total_saldo_medio AS saldo_medio_actual,
+                    saldo_medio_vista AS saldo_medio_vista_actual,
+                    saldo_medio_plazo AS saldo_medio_plazo_actual
+                FROM 
+                    sb_gf.bbdd_maestra_historica_personas_juridicas 
+                WHERE 
+                    fec_info = {fec_info_input}''')
+        
+        ############################################################################################################################
+        ############################################################################################################################
+        ## 4. Generación de indicadores de variación mensuales (Ingresos y saldos) en los últimos 12 meses ##
+        ## 4.1.1. Creacion de la tabla de evolucion de la variacion mensual de saldos e ingresos en los últimos 12 meses ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_var_saldos_{table_subfix}_00')
+
+        query = f"""CREATE TABLE sb_gf.variables_var_saldos_{table_subfix}_00 AS
+                    SELECT
+                        buc_cliente,"""
+
+        ## 4.1.2 Agregar los casos de COALESCE dinámicamente ##
+        for i in range(12):
+            query += """
+                COALESCE(SUM(CASE WHEN fecha = '""" + str(fecha_strings_13m[i]) + """' THEN total_saldo_medio ELSE 0 END)/
+                        SUM(CASE WHEN fecha = '""" + str(fecha_strings_13m[i+1]) + """' THEN total_saldo_medio ELSE 0 END) - 1, 0) AS var_saldo_mes""" + str(i) + """_mes""" + str(i+1) + ""","""
+
+        ## 4.1.3 Agregar el último caso COALESCE ##
+        query += """
+                COALESCE(SUM(CASE WHEN fecha = '""" + str(fecha_strings_13m[12]) + """' THEN total_saldo_medio ELSE 0 END)/
+                        SUM(CASE WHEN fecha = '""" + str(fecha_strings_13m[0]) + """' THEN total_saldo_medio ELSE 0 END) - 1, 0) AS var_saldo_mes12_mes0
+            FROM sb_gf.bbdd_maestra_historica_personas_juridicas
+            WHERE fecha IN """ + fecha_lista_13m + """
+            GROUP BY buc_cliente
+        """
+        ## 4.1.4 Eliminar la última coma al final del query ##
+        query = query.rstrip(',')
+
+        ## 4.1.5 Ejecutar la consulta ##
+        spark.sql(query)
+
+        ## 4.2 Tabla para la generacion de indicador de evolución mensual de saldos en el último año. 
+        ## Clasificación de la variación en: Disminución, aúmento y saldos lineales ##
+        spark.sql('DROP TABLE IF EXISTS sb_gf.variables_var_saldos_' + table_subfix + '_01')
+        df_var = spark.sql('SELECT buc_cliente,'
+        ' var_saldo_mes0_mes1, var_saldo_mes1_mes2, var_saldo_mes2_mes3, var_saldo_mes3_mes4, var_saldo_mes4_mes5, var_saldo_mes5_mes6, '
+        ' var_saldo_mes6_mes7, var_saldo_mes7_mes8, var_saldo_mes8_mes9, var_saldo_mes9_mes10, var_saldo_mes10_mes11, var_saldo_mes11_mes12 '
+        ' FROM sb_gf.variables_var_saldos_' + table_subfix + '_00')
+
+        conditions_mes0_mes1 = when(
+            (col("var_saldo_mes0_mes1") == 0) & (col("var_saldo_mes1_mes2") > 0), 2).when((
+                col("var_saldo_mes0_mes1") == 0) & (col("var_saldo_mes1_mes2") == 0), 1).when(
+                    (col("var_saldo_mes0_mes1") < -0.1), 0).when(
+                        (col("var_saldo_mes0_mes1") >= -0.1) & (col("var_saldo_mes0_mes1") <= -0.1), 1).when(
+                            (col("var_saldo_mes0_mes1") > 0.1), 2).otherwise(1)
+        
+        conditions_mes1_mes2 = when(
+            (col("var_saldo_mes1_mes2") == 0) & (col("var_saldo_mes2_mes3") > 0), 2).when(
+                (col("var_saldo_mes1_mes2") == 0) & (col("var_saldo_mes0_mes1") < 0), 0).when(
+                    (col("var_saldo_mes1_mes2") == 0) & ((col("var_saldo_mes2_mes3") == 0) | (col("var_saldo_mes0_mes1") == 0)), 1).when(
+                        (col("var_saldo_mes1_mes2") < -0.1), 0).when(
+                            (col("var_saldo_mes1_mes2") >= -0.1) & (col("var_saldo_mes1_mes2") <= -0.1), 1).when(
+                                (col("var_saldo_mes1_mes2") > 0.1), 2).otherwise(1)
+
+        conditions_mes2_mes3 = when(
+            (col("var_saldo_mes2_mes3") == 0) & (col("var_saldo_mes3_mes4") > 0), 2).when(
+                (col("var_saldo_mes2_mes3") == 0) & (col("var_saldo_mes1_mes2") < 0), 0).when(
+                    (col("var_saldo_mes2_mes3") == 0) & ((col("var_saldo_mes3_mes4") == 0) | (col("var_saldo_mes1_mes2") == 0)), 1).when(
+                        (col("var_saldo_mes2_mes3") < -0.1), 0).when(
+                            (col("var_saldo_mes2_mes3") >= -0.1) & (col("var_saldo_mes2_mes3") <= -0.1), 1).when(
+                                (col("var_saldo_mes2_mes3") > 0.1), 2).otherwise(1)
+
+        conditions_mes3_mes4 = when(
+            (col("var_saldo_mes3_mes4") == 0) & (col("var_saldo_mes4_mes5") > 0), 2).when(
+                (col("var_saldo_mes3_mes4") == 0) & (col("var_saldo_mes2_mes3") < 0), 0).when(
+                    (col("var_saldo_mes3_mes4") == 0) & ((col("var_saldo_mes4_mes5") == 0) | (col("var_saldo_mes2_mes3") == 0)), 1).when(
+                        (col("var_saldo_mes3_mes4") < -0.1), 0).when(
+                            (col("var_saldo_mes3_mes4") >= -0.1) & (col("var_saldo_mes3_mes4") <= -0.1), 1).when(
+                                (col("var_saldo_mes3_mes4") > 0.1), 2).otherwise(1)
+
+        conditions_mes4_mes5 = when(
+            (col("var_saldo_mes4_mes5") == 0) & (col("var_saldo_mes5_mes6") > 0), 2).when(
+                (col("var_saldo_mes4_mes5") == 0) & (col("var_saldo_mes3_mes4") < 0), 0).when(
+                    (col("var_saldo_mes4_mes5") == 0) & ((col("var_saldo_mes5_mes6") == 0) | (col("var_saldo_mes3_mes4") == 0)), 1).when(
+                        (col("var_saldo_mes4_mes5") < -0.1), 0).when(
+                            (col("var_saldo_mes4_mes5") >= -0.1) & (col("var_saldo_mes4_mes5") <= -0.1), 1).when(
+                                (col("var_saldo_mes4_mes5") > 0.1), 2).otherwise(1)
+
+        conditions_mes5_mes6 = when(
+            (col("var_saldo_mes5_mes6") == 0) & (col("var_saldo_mes6_mes7") > 0), 2).when(
+                (col("var_saldo_mes5_mes6") == 0) & (col("var_saldo_mes4_mes5") < 0), 0).when(
+                    (col("var_saldo_mes5_mes6") == 0) & ((col("var_saldo_mes6_mes7") == 0) | (col("var_saldo_mes4_mes5") == 0)), 1).when(
+                        (col("var_saldo_mes5_mes6") < -0.1), 0).when(
+                            (col("var_saldo_mes5_mes6") >= -0.1) & (col("var_saldo_mes5_mes6") <= -0.1), 1).when(
+                                (col("var_saldo_mes5_mes6") > 0.1), 2).otherwise(1)
+
+        conditions_mes6_mes7 = when(
+            (col("var_saldo_mes6_mes7") == 0) & (col("var_saldo_mes7_mes8") > 0), 2).when(
+                (col("var_saldo_mes6_mes7") == 0) & (col("var_saldo_mes5_mes6") < 0), 0).when(
+                    (col("var_saldo_mes6_mes7") == 0) & ((col("var_saldo_mes7_mes8") == 0) | (col("var_saldo_mes5_mes6") == 0)), 1).when(
+                        (col("var_saldo_mes6_mes7") < -0.1), 0).when(
+                            (col("var_saldo_mes6_mes7") >= -0.1) & (col("var_saldo_mes6_mes7") <= -0.1), 1).when(
+                                (col("var_saldo_mes6_mes7") > 0.1), 2).otherwise(1)
+
+        conditions_mes7_mes8 = when(
+            (col("var_saldo_mes7_mes8") == 0) & (col("var_saldo_mes8_mes9") > 0), 2).when(
+                (col("var_saldo_mes7_mes8") == 0) & (col("var_saldo_mes6_mes7") < 0), 0).when(
+                    (col("var_saldo_mes7_mes8") == 0) & ((col("var_saldo_mes8_mes9") == 0) | (col("var_saldo_mes6_mes7") == 0)), 1).when(
+                        (col("var_saldo_mes7_mes8") < -0.1), 0).when(
+                            (col("var_saldo_mes7_mes8") >= -0.1) & (col("var_saldo_mes7_mes8") <= -0.1), 1).when(
+                                (col("var_saldo_mes7_mes8") > 0.1), 2).otherwise(1)
+
+        conditions_mes8_mes9 = when(
+            (col("var_saldo_mes8_mes9") == 0) & (col("var_saldo_mes9_mes10") > 0), 2).when(
+                (col("var_saldo_mes8_mes9") == 0) & (col("var_saldo_mes7_mes8") < 0), 0).when(
+                    (col("var_saldo_mes8_mes9") == 0) & ((col("var_saldo_mes9_mes10") == 0) | (col("var_saldo_mes7_mes8") == 0)), 1).when(
+                        (col("var_saldo_mes8_mes9") < -0.1), 0).when(
+                            (col("var_saldo_mes8_mes9") >= -0.1) & (col("var_saldo_mes8_mes9") <= -0.1), 1).when(
+                                (col("var_saldo_mes8_mes9") > 0.1), 2).otherwise(1)
+
+        conditions_mes9_mes10 = when(
+            (col("var_saldo_mes9_mes10") == 0) & (col("var_saldo_mes10_mes11") > 0), 2).when(
+                (col("var_saldo_mes9_mes10") == 0) & (col("var_saldo_mes8_mes9") < 0), 0).when(
+                    (col("var_saldo_mes9_mes10") == 0) & ((col("var_saldo_mes10_mes11") == 0) | (col("var_saldo_mes8_mes9") == 0)), 1).when(
+                        (col("var_saldo_mes9_mes10") < -0.1), 0).when(
+                            (col("var_saldo_mes9_mes10") >= -0.1) & (col("var_saldo_mes9_mes10") <= -0.1), 1).when(
+                                (col("var_saldo_mes9_mes10") > 0.1), 2).otherwise(1)
+
+        conditions_mes10_mes11 = when(
+            (col("var_saldo_mes10_mes11") == 0) & (col("var_saldo_mes11_mes12") > 0), 2).when(
+                (col("var_saldo_mes10_mes11") == 0) & (col("var_saldo_mes9_mes10") < 0), 0).when(
+                    (col("var_saldo_mes10_mes11") == 0) & ((col("var_saldo_mes11_mes12") == 0) | (col("var_saldo_mes9_mes10") == 0)), 1).when(
+                        (col("var_saldo_mes10_mes11") < -0.1), 0).when(
+                            (col("var_saldo_mes10_mes11") >= -0.1) & (col("var_saldo_mes10_mes11") <= -0.1), 1).when(
+                                (col("var_saldo_mes10_mes11") > 0.1), 2).otherwise(1)
+
+        conditions_mes11_mes12 = when(
+            (col("var_saldo_mes10_mes11") == 0) & (col("var_saldo_mes10_mes11") < 0), 0).when(
+                (col("var_saldo_mes10_mes11") == 0) & (col("var_saldo_mes10_mes11") == 0), 1).when(
+                    (col("var_saldo_mes10_mes11") < -0.1), 0).when(
+                        (col("var_saldo_mes10_mes11") >= -0.1) & (col("var_saldo_mes10_mes11") <= -0.1), 1).when(
+                            (col("var_saldo_mes10_mes11") > 0.1), 2).otherwise(1)
+
+        df_var_result = df_var.withColumn(
+            "var_saldo_mes0_mes1_flag", conditions_mes0_mes1).withColumn(
+                "var_saldo_mes1_mes2_flag", conditions_mes1_mes2).withColumn(
+                    "var_saldo_mes2_mes3_flag", conditions_mes2_mes3).withColumn(
+                        "var_saldo_mes3_mes4_flag", conditions_mes3_mes4).withColumn(
+                            "var_saldo_mes4_mes5_flag", conditions_mes4_mes5).withColumn(
+                                "var_saldo_mes5_mes6_flag", conditions_mes5_mes6).withColumn(
+                                    "var_saldo_mes6_mes7_flag", conditions_mes6_mes7).withColumn(
+                                        "var_saldo_mes7_mes8_flag", conditions_mes7_mes8).withColumn(
+                                            "var_saldo_mes8_mes9_flag", conditions_mes8_mes9).withColumn(
+                                                "var_saldo_mes9_mes10_flag", conditions_mes9_mes10).withColumn(
+                                                    "var_saldo_mes10_mes11_flag", conditions_mes10_mes11).withColumn(
+                                                        "var_saldo_mes11_mes12_flag", conditions_mes11_mes12)
+    
+        df_var_result.select('buc_cliente',
+        'var_saldo_mes0_mes1_flag', 'var_saldo_mes1_mes2_flag', 'var_saldo_mes2_mes3_flag',
+        'var_saldo_mes3_mes4_flag', 'var_saldo_mes4_mes5_flag', 'var_saldo_mes5_mes6_flag',
+        'var_saldo_mes6_mes7_flag', 'var_saldo_mes7_mes8_flag', 'var_saldo_mes8_mes9_flag',
+        'var_saldo_mes9_mes10_flag', 'var_saldo_mes10_mes11_flag', 'var_saldo_mes11_mes12_flag',
+        ).write.mode('overwrite').saveAsTable('variables_var_saldos_' + table_subfix + '_01')
+
+        ## 4.3 Tabla para la generacion de indicador final con CONTADORES ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_var_saldos_{table_subfix}_02')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_var_saldos_{table_subfix}_02 AS 
+                SELECT 
+                    buc_cliente,
+                    -- CONTADOR BAJA --
+                    SUM(CASE WHEN var_saldo_mes0_mes1_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes1_mes2_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes2_mes3_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes3_mes4_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes4_mes5_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes5_mes6_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes6_mes7_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes7_mes8_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes8_mes9_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes9_mes10_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes10_mes11_flag = 2 THEN 1 ELSE 0 END + 
+                    CASE WHEN var_saldo_mes11_mes12_flag = 2 THEN 1 ELSE 0 END) AS contador_sube 
+                FROM 
+                    sb_gf.variables_var_saldos_{table_subfix}_01 
+                GROUP BY 
+                    buc_cliente''')
+        
+        ############################################################################################################################
+        ############################################################################################################################
+        ## 5. Generación de la tabla con variables históricas ##
+        ## 5.1.1 Extracción de variables de saldo históricas ##
+        spark.sql('DROP TABLE IF EXISTS sb_gf.variables_historicas_000_' + table_subfix)
+        spark.sql('CREATE TABLE sb_gf.variables_historicas_000_' + table_subfix + ' AS SELECT '
+        ' buc_cliente, '
+        ' MIN(CASE WHEN total_saldo_medio > 0 then fecha END) AS fecha_vinc '
+        ' FROM sb_gf.bbdd_maestra_historica_personas_juridicas ' 
+        f' WHERE fec_info <= ' + str(fec_info_input) + ' '
+        ' GROUP BY buc_cliente ')
+
+        ## 5.1.2 Indicadores de saldos promedios ponderados ##
+        spark.sql('DROP TABLE IF EXISTS sb_gf.variables_historicas_001_' + table_subfix)
+        spark.sql('CREATE TABLE sb_gf.variables_historicas_001_' + table_subfix + ' AS SELECT '
+        ' buc_cliente, '
+        ' SUM(CASE WHEN fecha <= \'' + str(fec_info_input_date) + '\' AND fecha >=  \'' + str(fec_info_12m) + '\' THEN total_saldo_medio ELSE 0 END) AS saldo_medio_hist_12m, '
+        ' SUM(CASE WHEN fecha <= \'' + str(fec_info_input_date) + '\' AND fecha >=  \'' + str(fec_info_6m) + '\' THEN total_saldo_medio ELSE 0 END) AS saldo_medio_hist_6m '
+        ' FROM sb_gf.bbdd_maestra_historica_personas_juridicas ' 
+        ' WHERE fecha in ' + fecha_lista_12m2 + ' '
+        ' GROUP BY buc_cliente ')
+
+        spark.sql('DROP TABLE IF EXISTS sb_gf.variables_historicas_00_' + table_subfix)
+        spark.sql('CREATE TABLE sb_gf.variables_historicas_00_' + table_subfix + ' AS SELECT '
+        ' a.buc_cliente, '
+        ' a.fecha_vinc, '
+        ' case when months_between(\'' + str(fec_info_input_date) + '\' ,a.fecha_vinc) >= 6 then b.saldo_medio_hist_6m * 0.16666 else b.saldo_medio_hist_6m / months_between(\'' + str(fec_info_input_date) + '\' ,a.fecha_vinc) end as saldo_medio_hist_6m, '
+        ' case when months_between(\'' + str(fec_info_input_date) + '\' ,a.fecha_vinc) >= 12 then b.saldo_medio_hist_12m * 0.08333333 else b.saldo_medio_hist_12m / months_between(\'' + str(fec_info_input_date) + '\' ,a.fecha_vinc) end as saldo_medio_hist_12m '
+        ' FROM sb_gf.variables_historicas_000_' + table_subfix + ' AS a '
+        ' LEFT JOIN sb_gf.variables_historicas_001_' + table_subfix + ' AS b '
+        ' ON a.buc_cliente = b.buc_cliente ')
+        
+        ## 5.1.3 Generación de variación de datos histórica e indicador de vinculación de saldos histórica ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_01_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.variables_historicas_01_{table_subfix} AS 
+                SELECT 
+                    buc_cliente, 
+                    saldo_medio_hist_6m, 
+                    saldo_medio_hist_12m, 
+                    (saldo_medio_hist_6m/saldo_medio_hist_12m -1) AS var_12m
+                FROM 
+                    sb_gf.variables_historicas_00_{table_subfix} ''')
+
+        ## 5.2. Antiguedad de Saldos Topado a 12 meses ##
+        spark.sql('DROP TABLE IF EXISTS sb_gf.variables_antiguedad_saldos_00_' + table_subfix)
+        spark.sql('CREATE TABLE sb_gf.variables_antiguedad_saldos_00_' + table_subfix + ' AS SELECT '
+        ' buc_cliente, '
+        ' MIN(CASE WHEN total_saldo_medio > 0 then fecha END) AS fecha_vinc '
+        ' FROM sb_gf.bbdd_maestra_historica_personas_juridicas ' 
+        f' WHERE fec_info >={int(f"{fecha_strings_13m[0][0:4]}{fecha_strings_13m[0][5:7]}")} AND fec_info <= ' + str(fec_info_input) + ' '
+        ' GROUP BY buc_cliente ')
+
+        spark.sql('DROP TABLE IF EXISTS sb_gf.variables_antiguedad_saldos_01_' + table_subfix)
+        spark.sql('CREATE TABLE sb_gf.variables_antiguedad_saldos_01_' + table_subfix + ' AS SELECT '
+        ' a.buc_cliente, '
+        ' a.fecha_vinc, '
+        ' months_between(\'' + str(fec_info_input_date) + '\' ,a.fecha_vinc) as vinc_saldos '
+        ' FROM sb_gf.variables_antiguedad_saldos_00_' + table_subfix + ' AS a ')
+        
+
+        ############################################################################################################################
+        ############################################################################################################################
+        ## 6. Extracción del indicador ACTIVO y segmento comercial ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.indicadores_activo_00_' + table_subfix)
+        spark.sql(f'''CREATE TABLE sb_gf.indicadores_activo_00_{table_subfix} AS
+        SELECT 
+            d.buc_cliente,
+            c.cve_grupo,
+            c.id_activo 
+        FROM sb_gf.bbdd_maestra_historica_personas_juridicas d
+        LEFT JOIN (SELECT DISTINCT r.* FROM (SELECT 
+                        b.cve_cliente,
+                        b.cve_grupo,
+                        a.id_activo
+                    FROM sb_gf.cat_grupos_gesfin_simplai b
+                    LEFT JOIN sb_gf.tabla_clientes_inactivos_personas_juridicas_abril_2024 a
+                    ON b.cve_grupo=a.id_grupo) r ) c
+        ON d.buc_cliente =c.cve_cliente
+        WHERE d.fec_info ={fec_info_input}''')
+
+        ############################################################################################################################
+        ############################################################################################################################
+        ## 7. Extracción indicadores transaccionales ## 
+        spark.sql(f'''DROP TABLE IF EXISTS sb_gf.indicadores_movimientos_00_{table_subfix}''')
+        spark.sql(f'''CREATE TABLE sb_gf.indicadores_movimientos_00_{table_subfix} AS
+                SELECT
+                    *
+                FROM 
+                    sb_gf.tabla_movimientos_mensual_nivel_cliente_indicadores
+                WHERE 
+                    fec_info={fec_info_input}''')
+
+        ############################################################################################################################
+        ############################################################################################################################
+        ## 8. Saldos mensuales pasados (12 meses) ## 
+        meses_saldos=meses_necesarios(str(fec_info_input),13)
+
+        spark.sql('DROP TABLE IF EXISTS sb_gf.saldos_mensuales_pasados_00_'+table_subfix)
+        spark.sql(f'''CREATE TABLE sb_gf.saldos_mensuales_pasados_00_{table_subfix} AS
+                    SELECT
+                        a.buc_cliente,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[1]} THEN b.total_saldo_medio END) AS saldo_medio_total_1m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[2]} THEN b.total_saldo_medio END) AS saldo_medio_total_2m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[3]} THEN b.total_saldo_medio END) AS saldo_medio_total_3m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[4]} THEN b.total_saldo_medio END) AS saldo_medio_total_4m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[5]} THEN b.total_saldo_medio END) AS saldo_medio_total_5m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[6]} THEN b.total_saldo_medio END) AS saldo_medio_total_6m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[7]} THEN b.total_saldo_medio END) AS saldo_medio_total_7m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[8]} THEN b.total_saldo_medio END) AS saldo_medio_total_8m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[9]} THEN b.total_saldo_medio END) AS saldo_medio_total_9m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[10]} THEN b.total_saldo_medio END) AS saldo_medio_total_10m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[11]} THEN b.total_saldo_medio END) AS saldo_medio_total_11m,
+                        MAX(CASE WHEN b.fec_info = {meses_saldos[12]} THEN b.total_saldo_medio END) AS saldo_medio_total_12m
+                    FROM
+                        sb_gf.bbdd_maestra_historica_personas_juridicas a
+                    LEFT JOIN 
+                        sb_gf.bbdd_maestra_historica_personas_juridicas b
+                    ON 
+                        a.buc_cliente=b.buc_cliente
+                    WHERE 
+                        a.fec_info={fec_info_input}
+                    GROUP BY
+                        a.buc_cliente''')
+
+        ############################################################################################################################
+        ############################################################################################################################
+        ## 9. Generación de la tabla final ML READY ## 
+        ## 9.1 LEFT JOIN COMPLETO de las anteriores variables ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.ml_ready_estabilidad_00_{table_subfix}')
+        spark.sql(f'''CREATE TABLE sb_gf.ml_ready_estabilidad_00_{table_subfix} AS 
+                SELECT 
+                    a.*,
+                    {fec_info_input} AS fec_info,  
+                    c.saldo_medio_pasado_12m,
+                    m.saldo_medio_hist_6m,
+                    m.saldo_medio_hist_12m,
+                    m.var_12m, 
+                    z.vinc_saldos as vinc_saldos_nuevo,
+                    g.contador_sube,
+                    CASE 
+                        WHEN e.saldo_medio_pasado_3m IS NULL THEN 0 
+                        WHEN e.saldo_medio_pasado_3m = 0 THEN 0 
+                        WHEN f.saldo_medio_3m IS NULL THEN -20 
+                        WHEN f.saldo_medio_3m = 0 THEN -20 
+                        ELSE f.saldo_medio_3m / e.saldo_medio_pasado_3m - 1 
+                    END AS variacion_saldo_3m_num, 
+                    CASE 
+                        WHEN d.saldo_medio_pasado_6m IS NULL THEN 0 
+                        WHEN d.saldo_medio_pasado_6m = 0 THEN 0 
+                        WHEN h.saldo_medio_6m IS NULL THEN -20 
+                        WHEN h.saldo_medio_6m = 0 THEN -20 
+                        ELSE h.saldo_medio_6m/d.saldo_medio_pasado_6m - 1 
+                    END AS variacion_saldo_6m_num, 
+                    CASE 
+                        WHEN c.saldo_medio_pasado_12m IS NULL THEN 0 
+                        WHEN c.saldo_medio_pasado_12m = 0 THEN 0 
+                        WHEN b.saldo_medio_12m IS NULL THEN -20 
+                        WHEN b.saldo_medio_12m = 0 THEN -20 
+                        ELSE b.saldo_medio_12m / c.saldo_medio_pasado_12m - 1 
+                    END AS variacion_saldo_12m_num, 
+                    CASE 
+                        WHEN i.saldo_medio_trim_pasado_3m IS NULL THEN 0 
+                        WHEN i.saldo_medio_trim_pasado_3m = 0 THEN 0 
+                        WHEN f.saldo_medio_3m IS NULL THEN -20 
+                        WHEN f.saldo_medio_3m = 0 THEN -20 
+                        ELSE f.saldo_medio_3m / i.saldo_medio_trim_pasado_3m - 1 
+                    END AS variacion_saldo_trimestral_num, 
+                    CASE 
+                        WHEN k.saldo_medio_sem_pasado_6m IS NULL THEN 0 
+                        WHEN k.saldo_medio_sem_pasado_6m = 0 THEN 0 
+                        WHEN h.saldo_medio_6m IS NULL THEN -20 
+                        WHEN h.saldo_medio_6m = 0 THEN -20 
+                        ELSE h.saldo_medio_6m/k.saldo_medio_sem_pasado_6m - 1 
+                    END AS variacion_saldo_semestral_num, 
+                    n.cap_ahorro_total_actual,
+                    n.ingresos_duros_actual, 
+                    n.ingresos_financieros_promedio_trim_anterior,
+                    n.var_gastos_financieros_trim_actual_anterior,
+                    n.var_gastos_consumo_mes_actual_trim_anterior,
+                    n.gasto_total_actual,
+                    n.ingreso_total_actual,
+                    n.ingresos_efectivo_actual,
+                    n.var_cap_ahorro_dura_mes_actual_trim_anterior,
+                    n.var_gastos_transferencia_mes_actual_trim_anterior,
+                    t.id_activo,
+                    p.saldo_medio_total_1m, 
+                    p.saldo_medio_total_2m, 
+                    p.saldo_medio_total_3m, 
+                    p.saldo_medio_total_4m, 
+                    p.saldo_medio_total_5m, 
+                    p.saldo_medio_total_6m, 
+                    p.saldo_medio_total_7m, 
+                    p.saldo_medio_total_8m, 
+                    p.saldo_medio_total_9m, 
+                    p.saldo_medio_total_10m, 
+                    p.saldo_medio_total_11m, 
+                    p.saldo_medio_total_12m 
+                FROM 
+                    sb_gf.variables_cliente_saldo_{table_subfix} AS a 
+                LEFT JOIN sb_gf.variables_historicas_12m_{table_subfix} AS b ON a.buc_cliente = b.buc_cliente 
+                LEFT JOIN sb_gf.variables_historicas_6m_{table_subfix} AS h ON a.buc_cliente = h.buc_cliente 
+                LEFT JOIN sb_gf.variables_historicas_3m_{table_subfix} AS f ON a.buc_cliente = f.buc_cliente 
+                LEFT JOIN sb_gf.variables_saldo_pasado12m_{table_subfix} AS c ON a.buc_cliente = c.buc_cliente 
+                LEFT JOIN sb_gf.variables_saldo_pasado6m_{table_subfix} AS d ON a.buc_cliente = d.buc_cliente 
+                LEFT JOIN sb_gf.variables_saldo_pasado3m_{table_subfix} AS e ON a.buc_cliente = e.buc_cliente 
+                LEFT JOIN sb_gf.variables_var_saldos_{table_subfix}_02 AS g ON a.buc_cliente = g.buc_cliente 
+                LEFT JOIN sb_gf.variables_saldo_trimestral_pasado3m_{table_subfix} AS i ON a.buc_cliente = i.buc_cliente 
+                LEFT JOIN sb_gf.variables_saldo_semestral_pasado6m_{table_subfix} AS k ON a.buc_cliente = k.buc_cliente 
+                LEFT JOIN sb_gf.variables_var_saldos_{table_subfix}_00 AS l ON a.buc_cliente = l.buc_cliente 
+                LEFT JOIN sb_gf.variables_historicas_01_{table_subfix} AS m ON a.buc_cliente = m.buc_cliente 
+                LEFT JOIN sb_gf.variables_antiguedad_saldos_01_{table_subfix} as z ON a.buc_cliente=z.buc_cliente
+                LEFT JOIN sb_gf.indicadores_movimientos_00_{table_subfix} AS n ON a.buc_cliente = n.buc_cliente 
+                LEFT JOIN sb_gf.indicadores_activo_00_{table_subfix} AS t ON a.buc_cliente = t.buc_cliente 
+                LEFT JOIN sb_gf.saldos_mensuales_pasados_00_{table_subfix} AS p ON a.buc_cliente = p.buc_cliente 
+                WHERE (a.saldo_medio_actual <> 0 OR a.saldo_medio_actual <> NULL) AND 
+                a.nuevo_nivel IN ("RESTO", "PARTICULARES", "PYMES", "EMPRESAS", "WEALTH MANAGEMENT",  
+                "INSTITUCIONES", "GLOBAL TRANSACTION BANKING") ''')
+
+        ## 9.2 Eliminar tablas temporales previas ##
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_12m_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_6M_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_3M_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_pasado3m_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_pasado6m_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_pasado12m_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_trimestral_pasado3m_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_saldo_semestral_pasado6m_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_cliente_saldo_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_var_saldos_{table_subfix}_00')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_var_saldos_{table_subfix}_01')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_var_saldos_{table_subfix}_02')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_00_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_000_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_001_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_historicas_01_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_antiguedad_saldos_00_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.variables_antiguedad_saldos_01_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.indicadores_movimientos_00_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.indicadores_activo_00_{table_subfix}')
+        spark.sql(f'DROP TABLE IF EXISTS sb_gf.saldos_mensuales_pasados_00_{table_subfix}')
+        
+    ################################################################################################################################
+    ################################################################################################################################
+
+    ## Generación de los indicadores mensuales del mes seleccionado ##
+ml_ready_table(table_subfix, fec_info_input)
+
+
+
+    ## Funciones de transformación para asignación de buckets a variables para el modelo de cortes expertos ##
+def buckets_variables_cortes_expertos(df):
+    # 1 #
+    edad_buckets = F.when(F.col('edad').isNull(), 0) \
+                .when(F.col('edad') <= 0, 1) \
+                .when(F.col('edad') <= 3, 2) \
+                .when(F.col('edad') <= 5, 3) \
+                .when(F.col('edad') <= 15, 4) \
+                .when(F.col('edad') > 15, 5) \
+                .otherwise(6)
+    # 2 #
+    cap_ahorro_total_actual_buckets = F.when(F.col('cap_ahorro_total_actual').isNull(), 0) \
+                                    .when(F.col('cap_ahorro_total_actual') <= -10000, 1) \
+                                    .when(F.col('cap_ahorro_total_actual') <= 0, 2) \
+                                    .when(F.col('cap_ahorro_total_actual') <= 50000, 3) \
+                                    .when(F.col('cap_ahorro_total_actual') > 50000, 4) \
+                                    .otherwise(5)
+    # 3 #
+    ingresos_efectivo_actual_buckets = F.when(F.col('ingresos_efectivo_actual').isNull(), 0) \
+                                    .when(F.col('ingresos_efectivo_actual') <= 6000, 1) \
+                                    .when(F.col('ingresos_efectivo_actual') > 6000, 2) \
+                                    .otherwise(3)
+    # 4 #
+    var_gastos_consumo_mes_actual_trim_anterior_buckets = F.when(F.col('var_gastos_consumo_mes_actual_trim_anterior').isNull(), 0) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= -1, 1) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= -0.5, 2) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= -0.2, 3) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= 0, 4) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= 0.2, 5) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= 0.5, 6) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= 1, 7) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') > 1, 8) \
+                                                        .otherwise(9)
+    # 5 #
+    ingresos_financieros_promedio_trim_anterior_buckets = F.when(F.col('ingresos_financieros_promedio_trim_anterior').isNull(), 0) \
+                                                        .when(F.col('ingresos_financieros_promedio_trim_anterior') <= 30000, 1) \
+                                                        .when(F.col('ingresos_financieros_promedio_trim_anterior') > 30000, 2) \
+                                                        .otherwise(3)
+    # 6 #
+    ingresos_duros_actual_buckets = F.when(F.col('ingresos_duros_actual').isNull(), 0) \
+                                .when(F.col('ingresos_duros_actual') <= 100000, 1) \
+                                .when(F.col('ingresos_duros_actual') > 100000, 2) \
+                                .otherwise(3)
+    # 7 #
+    vinc_saldos_nuevo_buckets = F.when(F.col('vinc_saldos_nuevo').isNull(), 0) \
+                            .when(F.col('vinc_saldos_nuevo') <= 11, 1) \
+                            .when(F.col('vinc_saldos_nuevo') > 11, 2) \
+                            .otherwise(3)
+    # 8 #
+    var_12m_buckets = F.when(F.col('var_12m').isNull(), 0) \
+                    .when(F.col('var_12m') <= -1, 1) \
+                    .when(F.col('var_12m') <= -0.5, 2) \
+                    .when(F.col('var_12m') <= -0.2, 3) \
+                    .when(F.col('var_12m') <= 0, 4) \
+                    .when(F.col('var_12m') <= 0.2, 5) \
+                    .when(F.col('var_12m') <= 0.5, 6) \
+                    .when(F.col('var_12m') <= 1, 7) \
+                    .when(F.col('var_12m') <= 2, 8) \
+                    .when(F.col('var_12m') > 2, 9) \
+                    .otherwise(10)
+
+    # 9 #
+    variacion_saldo_semestral_num_buckets = F.when(F.col('variacion_saldo_semestral_num').isNull(), 0) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= -1, 1) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= -0.5, 2) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= -0.2, 3) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= 0, 4) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= 0.2, 5) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= 0.5, 6) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= 1, 7) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= 2, 8) \
+                                        .when(F.col('variacion_saldo_semestral_num') > 2, 9) \
+                                        .otherwise(10)
+
+    # 10 #
+    var_gastos_transferencia_mes_actual_trim_anterior_buckets = F.when(F.col('var_gastos_transferencia_mes_actual_trim_anterior').isNull(), 0) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') <= -1, 1) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') <= -0.5, 2) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') <= -0.2, 3) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') <= 0, 4) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') <= 0.2, 5) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') <= 0.5, 6) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') <= 1, 7) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') > 1, 8) \
+                                                            .otherwise(9)
+
+    # 11 #
+    contador_sube_buckets = F.when(F.col('contador_sube').isNull(), 0) \
+                        .when(F.col('contador_sube') <= 2, 1) \
+                        .when(F.col('contador_sube') <= 4, 2) \
+                        .when(F.col('contador_sube') <= 6, 3) \
+                        .when(F.col('contador_sube') <= 8, 4) \
+                        .when(F.col('contador_sube') > 8, 5) \
+                        .otherwise(6)
+
+    # 12 #
+    saldo_medio_actual_buckets = F.when(F.col('saldo_medio_actual').isNull(), 0) \
+                                .when(F.col('saldo_medio_actual') <= 15000, 1) \
+                                .when(F.col('saldo_medio_actual') <= 50000, 2) \
+                                .when(F.col('saldo_medio_actual') <= 300000, 3) \
+                                .when(F.col('saldo_medio_actual') > 300000, 4) \
+                                .otherwise(5)
+
+    # 13 #
+    var_gastos_financieros_trim_actual_anterior_buckets = F.when(F.col('var_gastos_financieros_trim_actual_anterior').isNull(), 0) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') <= -1, 1) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') <= -0.5, 2) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') <= -0.2, 3) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') <= 0, 4) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') <= 0.2, 5) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') <= 0.5, 6) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') <= 1, 7) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') > 1, 8) \
+                                                        .otherwise(9)
+
+    # 14 #
+    var_cap_ahorro_dura_mes_actual_trim_anterior_buckets = F.when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior').isNull(), 0) \
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') <= -1, 1)\
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') <= -0.5, 2) \
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') <= -0.2, 3) \
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') <= 0, 4) \
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') <= 0.2, 5) \
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') <= 0.5, 6) \
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') <= 1, 7) \
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') > 1, 8) \
+                                                        .otherwise(9)
+
+    # 15 #
+    ingreso_total_actual_buckets = F.when(F.col('ingreso_total_actual').isNull(), 0) \
+                                .when(F.col('ingreso_total_actual') <= 30000, 1) \
+                                .when(F.col('ingreso_total_actual') <= 300000, 2) \
+                                .when(F.col('ingreso_total_actual') <= 1500000, 3) \
+                                .when(F.col('ingreso_total_actual') > 1500000, 4) \
+                                .otherwise(5)
+    # 16 #
+    gasto_total_actual_buckets = F.when(F.col('gasto_total_actual').isNull(), 0) \
+                                .when(F.col('gasto_total_actual') <= -1500000, 1) \
+                                .when(F.col('gasto_total_actual') <= -300000, 2) \
+                                .when(F.col('gasto_total_actual') <= -30000, 3) \
+                                .when(F.col('gasto_total_actual') > -30000, 4) \
+                                .otherwise(5)
+    # 17 #
+    variacion_saldo_trimestral_num_buckets = F.when(F.col('variacion_saldo_trimestral_num').isNull(), 0) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= -1, 1) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= -0.5, 2) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= -0.2, 3) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= 0, 4) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= 0.2, 5) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= 0.5, 6) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= 1, 7) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= 2, 8) \
+                                            .when(F.col('variacion_saldo_trimestral_num') > 2, 9) \
+                                            .otherwise(10)
+    # 18 #
+    variacion_saldo_12m_num_buckets = F.when(F.col('variacion_saldo_12m_num').isNull(), 0) \
+                                    .when(F.col('variacion_saldo_12m_num') <= -1, 1) \
+                                    .when(F.col('variacion_saldo_12m_num') <= -0.5, 2) \
+                                    .when(F.col('variacion_saldo_12m_num') <= -0.2, 3) \
+                                    .when(F.col('variacion_saldo_12m_num') <= 0, 4) \
+                                    .when(F.col('variacion_saldo_12m_num') <= 0.2, 5) \
+                                    .when(F.col('variacion_saldo_12m_num') <= 0.5, 6) \
+                                    .when(F.col('variacion_saldo_12m_num') <= 1, 7) \
+                                    .when(F.col('variacion_saldo_12m_num') <= 2, 8) \
+                                    .when(F.col('variacion_saldo_12m_num') > 2, 9) \
+                                    .otherwise(10)
+    # 19 #
+    nuevo_nivel_mod = F.when(F.col('nuevo_nivel')=="WEALTH MANAGEMENT", 1) \
+                .when(F.col('nuevo_nivel') =="GLOBAL TRANSACTION BANKING", 2) \
+                .when(F.col('nuevo_nivel') == "EMPRESAS", 3) \
+                .when(F.col('nuevo_nivel') == "PYMES", 4) \
+                .when(F.col('nuevo_nivel') == "INSTITUCIONES", 5) \
+                .otherwise(6)
+    
+    df_indexed=df.withColumn('edad_buckets',edad_buckets)\
+                    .withColumn('cap_ahorro_total_actual_buckets',cap_ahorro_total_actual_buckets)\
+                    .withColumn('ingresos_efectivo_actual_buckets',ingresos_efectivo_actual_buckets)\
+                    .withColumn('var_gastos_consumo_mes_actual_trim_anterior_buckets',var_gastos_consumo_mes_actual_trim_anterior_buckets)\
+                    .withColumn('ingresos_financieros_promedio_trim_anterior_buckets',ingresos_financieros_promedio_trim_anterior_buckets)\
+                    .withColumn('ingresos_duros_actual_buckets',ingresos_duros_actual_buckets)\
+                    .withColumn('vinc_saldos_nuevo_buckets',vinc_saldos_nuevo_buckets)\
+                    .withColumn('var_12m_buckets',var_12m_buckets)\
+                    .withColumn('variacion_saldo_semestral_num_buckets',variacion_saldo_semestral_num_buckets)\
+                    .withColumn('var_gastos_transferencia_mes_actual_trim_anterior_buckets',var_gastos_transferencia_mes_actual_trim_anterior_buckets)\
+                    .withColumn('contador_sube_buckets',contador_sube_buckets)\
+                    .withColumn('saldo_medio_actual_buckets',saldo_medio_actual_buckets)\
+                    .withColumn('var_gastos_financieros_trim_actual_anterior_buckets',var_gastos_financieros_trim_actual_anterior_buckets)\
+                    .withColumn('var_cap_ahorro_dura_mes_actual_trim_anterior_buckets',var_cap_ahorro_dura_mes_actual_trim_anterior_buckets)\
+                    .withColumn('ingreso_total_actual_buckets',ingreso_total_actual_buckets)\
+                    .withColumn('gasto_total_actual_buckets',gasto_total_actual_buckets)\
+                    .withColumn('variacion_saldo_trimestral_num_buckets',variacion_saldo_trimestral_num_buckets)\
+                    .withColumn('variacion_saldo_12m_num_buckets',variacion_saldo_12m_num_buckets)\
+                    .withColumn('nuevo_nivel_mod',nuevo_nivel_mod)
+    return df_indexed
+
+    ################################################################################################################################
+    ################################################################################################################################
+
+    ################################################################################################################################
+    ################################################################################################################################
+
+    ## Funciones de transformación para asignación de buckets a variables para el modelo de cortes matemáticos ##
+def buckets_variables_cortes_matematicos(df):
+    # 1 #
+    edad_buckets = F.when(F.col('edad').isNull(), 0) \
+                .when(F.col('edad') <= 6, 1) \
+                .when(F.col('edad') <= 11, 2) \
+                .when(F.col('edad') <= 20, 3) \
+                .when(F.col('edad') > 20, 4) \
+                .otherwise(5)
+    # 2 #
+    cap_ahorro_total_actual_buckets = F.when(F.col('cap_ahorro_total_actual').isNull(), 0) \
+                                    .when(F.col('cap_ahorro_total_actual') <= -25757.8, 1) \
+                                    .when(F.col('cap_ahorro_total_actual') <= -603.2, 2) \
+                                    .when(F.col('cap_ahorro_total_actual') <= 895, 3) \
+                                    .when(F.col('cap_ahorro_total_actual') > 895, 4) \
+                                    .otherwise(5)
+    # 3 #
+    ingresos_efectivo_actual_buckets = F.when(F.col('ingresos_efectivo_actual').isNull(), 0) \
+                                    .when(F.col('ingresos_efectivo_actual') <= 0.35, 1) \
+                                    .when(F.col('ingresos_efectivo_actual') <= 1.5, 2) \
+                                    .when(F.col('ingresos_efectivo_actual') <= 15013.2, 3) \
+                                    .when(F.col('ingresos_efectivo_actual') > 15013.2, 4) \
+                                    .otherwise(5)
+    # 4 #
+    var_gastos_consumo_mes_actual_trim_anterior_buckets = F.when(F.col('var_gastos_consumo_mes_actual_trim_anterior').isNull(), 0) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= -0.030489, 1) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= 0, 2) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') <= 0.362517, 3) \
+                                                        .when(F.col('var_gastos_consumo_mes_actual_trim_anterior') > 0.362517, 4) \
+                                                        .otherwise(5)
+    # 5 #
+    ingresos_financieros_promedio_trim_anterior_buckets = F.when(F.col('ingresos_financieros_promedio_trim_anterior').isNull(), 0) \
+                                                        .when(F.col('ingresos_financieros_promedio_trim_anterior') <= 0, 1) \
+                                                        .when(F.col('ingresos_financieros_promedio_trim_anterior') <= 52775.6316 , 2) \
+                                                        .when(F.col('ingresos_financieros_promedio_trim_anterior') > 52775.6316 , 3) \
+                                                        .otherwise(4)
+    # 6 #
+    ingresos_duros_actual_buckets = F.when(F.col('ingresos_duros_actual').isNull(), 0) \
+                                .when(F.col('ingresos_duros_actual') <=  0.005 , 1) \
+                                .when(F.col('ingresos_duros_actual') <= 0.515, 2) \
+                                .when(F.col('ingresos_duros_actual') > 0.515, 3) \
+                                .otherwise(4)
+    # 7 #
+    vinc_saldos_nuevo_buckets = F.when(F.col('vinc_saldos_nuevo').isNull(), 0) \
+                            .when(F.col('vinc_saldos_nuevo') <= 11, 1) \
+                            .when(F.col('vinc_saldos_nuevo') > 11, 2) \
+                            .otherwise(3)
+    # 8 #
+    var_12m_buckets = F.when(F.col('var_12m').isNull(), 0) \
+                    .when(F.col('var_12m') <=  -0.3252352, 1) \
+                    .when(F.col('var_12m') <=  0.161566 , 2) \
+                    .when(F.col('var_12m') >  0.161566 , 3) \
+                    .otherwise(4)
+
+    # 9 #
+    variacion_saldo_semestral_num_buckets = F.when(F.col('variacion_saldo_semestral_num').isNull(), 0) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= -0.33431, 1) \
+                                        .when(F.col('variacion_saldo_semestral_num') <= 0.90601, 2) \
+                                        .when(F.col('variacion_saldo_semestral_num') > 0.90601, 3) \
+                                        .otherwise(4)
+
+    # 10 #
+    var_gastos_transferencia_mes_actual_trim_anterior_buckets = F.when(F.col('var_gastos_transferencia_mes_actual_trim_anterior').isNull(), 0) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') <=  -0.404897, 1) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') <=  0.559974, 2) \
+                                                            .when(F.col('var_gastos_transferencia_mes_actual_trim_anterior') >  0.559974, 3) \
+                                                            .otherwise(4)
+    # 11 #
+    contador_sube_buckets = F.when(F.col('contador_sube').isNull(), 0) \
+                        .when(F.col('contador_sube') <= 0, 1) \
+                        .when(F.col('contador_sube') <= 6, 2) \
+                        .when(F.col('contador_sube') > 6, 3) \
+                        .otherwise(4)
+
+    # 12 #
+    saldo_medio_actual_buckets = F.when(F.col('saldo_medio_actual').isNull(), 0) \
+                                .when(F.col('saldo_medio_actual') <= 9476.26, 1) \
+                                .when(F.col('saldo_medio_actual') <=  506423.59 , 2) \
+                                .when(F.col('saldo_medio_actual') >  506423.59 , 3) \
+                                .otherwise(4)
+
+    # 13 #
+    var_gastos_financieros_trim_actual_anterior_buckets = F.when(F.col('var_gastos_financieros_trim_actual_anterior').isNull(), 0) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') <= -0.591534, 1) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') <= 0.33954, 2) \
+                                                        .when(F.col('var_gastos_financieros_trim_actual_anterior') > 0.33954, 3) \
+                                                        .otherwise(4)
+    # 14 #
+    var_cap_ahorro_dura_mes_actual_trim_anterior_buckets = F.when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior').isNull(), 0) \
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') <=-0.288628, 1)\
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') <= 0.43234, 2) \
+                                                        .when(F.col('var_cap_ahorro_dura_mes_actual_trim_anterior') > 0.43234, 3) \
+                                                        .otherwise(4)
+    # 15 #
+    ingreso_total_actual_buckets = F.when(F.col('ingreso_total_actual').isNull(), 0) \
+                                .when(F.col('ingreso_total_actual') <= 0.005, 1) \
+                                .when(F.col('ingreso_total_actual') <=  79650.605, 2) \
+                                .when(F.col('ingreso_total_actual') <= 2448015.415, 3) \
+                                .when(F.col('ingreso_total_actual') > 2448015.415, 4) \
+                                .otherwise(5)
+    # 16 #
+    gasto_total_actual_buckets = F.when(F.col('gasto_total_actual').isNull(), 0) \
+                                .when(F.col('gasto_total_actual') <= -2248263.225, 1) \
+                                .when(F.col('gasto_total_actual') <=  -81804.67, 2) \
+                                .when(F.col('gasto_total_actual') <= -980.52, 3) \
+                                .when(F.col('gasto_total_actual') > -980.52, 4) \
+                                .otherwise(5)
+    # 17 #
+    variacion_saldo_trimestral_num_buckets = F.when(F.col('variacion_saldo_trimestral_num').isNull(), 0) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= -0.41311, 1) \
+                                            .when(F.col('variacion_saldo_trimestral_num') <= 0.561442, 2) \
+                                            .when(F.col('variacion_saldo_trimestral_num') > 0.561442, 3) \
+                                            .otherwise(4)
+    # 18 #
+    variacion_saldo_12m_num_buckets = F.when(F.col('variacion_saldo_12m_num').isNull(), 0) \
+                                    .when(F.col('variacion_saldo_12m_num') <= -0.321538, 1) \
+                                    .when(F.col('variacion_saldo_12m_num') <=  1.2068, 2) \
+                                    .when(F.col('variacion_saldo_12m_num') >  1.2068, 3) \
+                                    .otherwise(4)
+    # 19 #
+    nuevo_nivel_mod = F.when(F.col('nuevo_nivel')=="WEALTH MANAGEMENT", 1) \
+                .when(F.col('nuevo_nivel') =="GLOBAL TRANSACTION BANKING", 2) \
+                .when(F.col('nuevo_nivel') == "EMPRESAS", 3) \
+                .when(F.col('nuevo_nivel') == "PYMES", 4) \
+                .when(F.col('nuevo_nivel') == "INSTITUCIONES", 5) \
+                .otherwise(6)
+    
+    df_indexed=df.withColumn('edad_buckets',edad_buckets)\
+                    .withColumn('cap_ahorro_total_actual_buckets',cap_ahorro_total_actual_buckets)\
+                    .withColumn('ingresos_efectivo_actual_buckets',ingresos_efectivo_actual_buckets)\
+                    .withColumn('var_gastos_consumo_mes_actual_trim_anterior_buckets',var_gastos_consumo_mes_actual_trim_anterior_buckets)\
+                    .withColumn('ingresos_financieros_promedio_trim_anterior_buckets',ingresos_financieros_promedio_trim_anterior_buckets)\
+                    .withColumn('ingresos_duros_actual_buckets',ingresos_duros_actual_buckets)\
+                    .withColumn('vinc_saldos_nuevo_buckets',vinc_saldos_nuevo_buckets)\
+                    .withColumn('var_12m_buckets',var_12m_buckets)\
+                    .withColumn('variacion_saldo_semestral_num_buckets',variacion_saldo_semestral_num_buckets)\
+                    .withColumn('var_gastos_transferencia_mes_actual_trim_anterior_buckets',var_gastos_transferencia_mes_actual_trim_anterior_buckets)\
+                    .withColumn('contador_sube_buckets',contador_sube_buckets)\
+                    .withColumn('saldo_medio_actual_buckets',saldo_medio_actual_buckets)\
+                    .withColumn('var_gastos_financieros_trim_actual_anterior_buckets',var_gastos_financieros_trim_actual_anterior_buckets)\
+                    .withColumn('var_cap_ahorro_dura_mes_actual_trim_anterior_buckets',var_cap_ahorro_dura_mes_actual_trim_anterior_buckets)\
+                    .withColumn('ingreso_total_actual_buckets',ingreso_total_actual_buckets)\
+                    .withColumn('gasto_total_actual_buckets',gasto_total_actual_buckets)\
+                    .withColumn('variacion_saldo_trimestral_num_buckets',variacion_saldo_trimestral_num_buckets)\
+                    .withColumn('variacion_saldo_12m_num_buckets',variacion_saldo_12m_num_buckets)\
+                    .withColumn('nuevo_nivel_mod',nuevo_nivel_mod)
+    return df_indexed
+
+## Importar el dataframe con los indicadores ##
+df=spark.sql(f'''SELECT * 
+            FROM sb_gf.ml_ready_estabilidad_00_{table_subfix}''')
+
+
+## Listado de variables necesarias para cada modelo ##
+## Set de variables modelo de cortes expertos ##
+variables_lista_cortes_expertos=[
+        'nuevo_nivel_mod',
+        'edad_buckets',
+        'cap_ahorro_total_actual_buckets',
+        'ingresos_efectivo_actual_buckets',
+        'var_gastos_consumo_mes_actual_trim_anterior_buckets',
+        'ingresos_financieros_promedio_trim_anterior_buckets',
+        'ingresos_duros_actual_buckets',
+        'vinc_saldos_nuevo_buckets',
+        'var_12m_buckets',
+        'variacion_saldo_semestral_num_buckets',
+        'var_gastos_transferencia_mes_actual_trim_anterior_buckets',
+        'contador_sube_buckets',
+        'saldo_medio_actual_buckets',
+        'var_gastos_financieros_trim_actual_anterior_buckets',
+        'var_cap_ahorro_dura_mes_actual_trim_anterior_buckets',
+        'ingreso_total_actual_buckets',
+        'gasto_total_actual_buckets',
+        'variacion_saldo_trimestral_num_buckets',
+        'variacion_saldo_12m_num_buckets']
+
+## Aplicar las funciones para obtener las variables con sus correspondientes cortes ##
+df_pj_cortes_expertos_00=buckets_variables_cortes_expertos(df)
+
+## Se comprueba y se rellenan los posibles valores NA a 0 y a la vez filtramos por el set de variables de cada modelo ##
+df_pj_cortes_expertos_01 = df_pj_cortes_expertos_00.na.fill(value = 0, subset = variables_lista_cortes_expertos)
+    
+## Se prepara y se aplica el transformador de VectorAssembler para transformar todas las columnas del DataFrame a un único vector ##
+assemble_cortes_expertos = VectorAssembler(inputCols = variables_lista_cortes_expertos, outputCol = 'features')
+df_pj_cortes_expertos_02 = assemble_cortes_expertos.transform(df_pj_cortes_expertos_01)
+    
+## Carga de los modelos ##
+gbt_model_pj_cortes_expertos = GBTClassificationModel.load("/pro/workspace/gf/models/classification_pj_2024_cortes_expertos")
+    
+## Generación de predicciones de cada modelo ##
+predictions_pj_cortes_expertos = gbt_model_pj_cortes_expertos.transform(df_pj_cortes_expertos_02)
+    
+## Resultado de la predicción: Probabilidad (0% a 100%) de que un cliente sea inestable dentro de 12 meses. Asignación probabilidad al DataFrame ##
+to_array_function = udf(lambda v: v.toArray().tolist()[1], FloatType())
+predictions_pj_cortes_expertos = predictions_pj_cortes_expertos.withColumn('probability', to_array_function('probability'))
+    
+## Filtrar los clientes inactivos/activos
+predictions_pj_cortes_expertos_activos = predictions_pj_cortes_expertos.filter((col('id_activo') == 1) | (col('id_activo').isNull()))
+    
+predictions_pj_cortes_expertos_inactivos = predictions_pj_cortes_expertos.filter(col('id_activo')==0) 
+
+## Asignación de la clasificación con base al segmento comercial ##
+bandera=True
+
+## Se importa el dataframe que contiene los cortes para cada modelo de predicción, categoría y segmento comercial ##
+cortes_df=spark.sql('SELECT * FROM sb_gf.cortes_modelo_estabilidad_personas_juridicas')
+
+## Ciclo "for" para iterar sobre los 4 modelos de atención y sobre los clientes que sean activos ##
+for segmentos in range(6):
+
+        segmento=segmentos+1
+        
+        if segmento==6:
+            ### CATEGORIZACIÓN CORTES EXPERTOS ###
+            ## Filtrar por segmento comercial  ##
+            df_00_segmento_cortes_expertos=predictions_pj_cortes_expertos_activos.filter(col("nuevo_nivel_mod") == segmento)
+            ## Asignar sin categoría ##
+            df_01_segmento_cortes_expertos = df_00_segmento_cortes_expertos.withColumn('categoria', F.lit('Sin Categoria'))
+            df_segmento_cortes_expertos=df_segmento_cortes_expertos.union(df_01_segmento_cortes_expertos)
+
+        else:
+            ### CATEGORIZACIÓN CORTES EXPERTOS ###
+            ## Filtrar por segmento comercial  ##
+            df_00_segmento_cortes_expertos=predictions_pj_cortes_expertos_activos.filter(col("nuevo_nivel_mod") == segmento)
+            
+            ## Importar los cortes por segmento comercial para cada categoría ##
+            corte_expertos_A = cortes_df.filter((col('segmento')==segmento) & (col('categoria')=='A') & (col('modelo')=='CORTES EXPERTOS')).select('corte').collect()[0][0]
+            corte_expertos_B = cortes_df.filter((col('segmento')==segmento) & (col('categoria')=='B') & (col('modelo')=='CORTES EXPERTOS')).select('corte').collect()[0][0]
+            corte_expertos_C = cortes_df.filter((col('segmento')==segmento) & (col('categoria')=='C') & (col('modelo')=='CORTES EXPERTOS')).select('corte').collect()[0][0]
+
+            ## Asignar la categoría ##
+            def rank_classification_exp(val):
+                if val <= corte_expertos_A: return 'A'
+                elif val <= corte_expertos_B: return 'B'
+                elif val <= corte_expertos_C: return 'C'
+                else: return 'D'
+
+            rank_function_cortes_expertos = udf(lambda x: rank_classification_exp(x), StringType())
+            df_01_segmento_cortes_expertos = df_00_segmento_cortes_expertos.withColumn('categoria', rank_function_cortes_expertos('probability'))
+            
+            if bandera:
+                df_segmento_cortes_expertos=df_01_segmento_cortes_expertos
+                bandera=False
+            else:
+                df_segmento_cortes_expertos=df_segmento_cortes_expertos.union(df_01_segmento_cortes_expertos)
+
+    ################################################################################################################################
+    ################################################################################################################################
+## Asignación de categoría a clientes inactivos ##
+
+### CATEGORIZACIÓN CORTES EXPERTOS ###
+## Filtrar por segmento comercial  ##
+df_00_inactivos_cortes_expertos=predictions_pj_cortes_expertos_inactivos
+## Asignar sin categoría ##
+df_01_inactivos_cortes_expertos = df_00_inactivos_cortes_expertos.withColumn('categoria', F.lit('Inactivos'))
+df_segmento_cortes_expertos=df_segmento_cortes_expertos.union(df_01_inactivos_cortes_expertos)
+
+## Renombramiento de ciertas columnas para igualar columnas ##
+df_segmento_cortes_expertos = df_segmento_cortes_expertos.withColumnRenamed('nuevo_nivel', 'segmento')
+df_segmento_cortes_expertos = df_segmento_cortes_expertos.withColumnRenamed('saldo_medio_actual', 'saldo_medio_total_actual')
+df_segmento_cortes_expertos = df_segmento_cortes_expertos.withColumnRenamed('probability', 'probabilidad_inestabilidad')
+df_segmento_cortes_expertos = df_segmento_cortes_expertos.withColumnRenamed('cod_tip_persona', 'codigo_tipo_persona')
+
+spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+
+## Inserción de los resultados en la tabla para cada modelo de cortes expertos y matemáticos ##
+df_segmento_cortes_expertos \
+        .select([
+            'fec_info',
+            'buc_cliente',
+            'codigo_tipo_persona',
+            'segmento',
+            'categoria',
+            'probabilidad_inestabilidad',
+            'saldo_medio_total_actual',
+            'saldo_medio_vista_actual',
+            'saldo_medio_plazo_actual',
+            'saldo_medio_total_1m',
+            'saldo_medio_total_2m',
+            'saldo_medio_total_3m',
+            'saldo_medio_total_4m',
+            'saldo_medio_total_5m',
+            'saldo_medio_total_6m',
+            'saldo_medio_total_7m',
+            'saldo_medio_total_8m',
+            'saldo_medio_total_9m',
+            'saldo_medio_total_10m',
+            'saldo_medio_total_11m',
+            'saldo_medio_total_12m',
+            'id_activo'
+        ]) \
+        .write \
+        .mode('append') \
+        .format('hive') \
+        .partitionBy('fec_info') \
+        .saveAsTable('sb_gf.predicciones_modelo_estabilidad_pj_cortes_expertos')
+    
+    ################################################################################################################################
+    ################################################################################################################################
+
+
+
+## Set de variables modelo de cortes matemáticos ##
+variables_lista_cortes_matematicos=[
+     'nuevo_nivel_mod',
+    'edad_buckets',
+    'cap_ahorro_total_actual_buckets',
+    'ingresos_efectivo_actual_buckets',
+    'var_gastos_consumo_mes_actual_trim_anterior_buckets',
+    'ingresos_financieros_promedio_trim_anterior_buckets',
+    'ingresos_duros_actual_buckets',
+    'vinc_saldos_nuevo_buckets',
+    'var_12m_buckets',
+    'variacion_saldo_semestral_num_buckets',
+    'var_gastos_transferencia_mes_actual_trim_anterior_buckets',
+    'contador_sube_buckets',
+    'saldo_medio_actual_buckets',
+    'var_gastos_financieros_trim_actual_anterior_buckets',
+    'var_cap_ahorro_dura_mes_actual_trim_anterior_buckets',
+    'ingreso_total_actual_buckets',
+    'gasto_total_actual_buckets',
+    'variacion_saldo_trimestral_num_buckets',
+    'variacion_saldo_12m_num_buckets']
+
+## Aplicar las funciones para obtener las variables con sus correspondientes cortes ##
+df_pj_cortes_matematicos_00=buckets_variables_cortes_matematicos(df)
+ 
+## Se comprueba y se rellenan los posibles valores NA a 0 y a la vez filtramos por el set de variables de cada modelo ##
+df_pj_cortes_matematicos_01 = df_pj_cortes_matematicos_00.na.fill(value = 0, subset = variables_lista_cortes_matematicos)
+ 
+## Se prepara y se aplica el transformador de VectorAssembler para transformar todas las columnas del DataFrame a un único vector ##
+assemble_cortes_matematicos = VectorAssembler(inputCols = variables_lista_cortes_matematicos, outputCol = 'features')
+df_pj_cortes_matematicos_02 = assemble_cortes_matematicos.transform(df_pj_cortes_matematicos_01)
+ 
+## Carga de los modelos ##
+gbt_model_pj_cortes_matematicos = GBTClassificationModel.load("/pro/workspace/gf/models/classification_pj_2024_cortes_matematicos")
+ 
+## Generación de predicciones de cada modelo ##
+predictions_pj_cortes_matematicos=gbt_model_pj_cortes_matematicos.transform(df_pj_cortes_matematicos_02)
+ 
+## Resultado de la predicción: Probabilidad (0% a 100%) de que un cliente sea inestable dentro de 12 meses. Asignación probabilidad al DataFrame ##
+to_array_function = udf(lambda v: v.toArray().tolist()[1], FloatType())
+predictions_pj_cortes_matematicos = predictions_pj_cortes_matematicos.withColumn('probability', to_array_function('probability'))
+ 
+## Filtrar los clientes inactivos/activos
+predictions_pj_cortes_matematicos_activos = predictions_pj_cortes_matematicos.filter((col('id_activo') == 1) | (col('id_activo').isNull()))
+ 
+predictions_pj_cortes_matematicos_inactivos = predictions_pj_cortes_matematicos.filter(col('id_activo')==0)
+ 
+    ################################################################################################################################
+    ################################################################################################################################
+## Asignación de la clasificación con base al segmento comercial ##
+bandera=True
+ 
+## Ciclo "for" para iterar sobre los 4 modelos de atención y sobre los clientes que sean activos ##
+for segmentos in range(6):
+
+        segmento=segmentos+1
+        
+        if segmento==6:
+ 
+            ### CATEGORIZACIÓN CORTES MATEMÁTICOS ###
+            ## Filtrar por segmento comercial  ##
+            df_00_segmento_cortes_matematicos=predictions_pj_cortes_matematicos_activos.filter(col("nuevo_nivel_mod") == segmento)
+            ## Asignar sin categoría ##
+            df_01_segmento_cortes_matematicos = df_00_segmento_cortes_matematicos.withColumn('categoria', F.lit('Sin Categoria'))
+            df_segmento_cortes_matematicos=df_segmento_cortes_matematicos.union(df_01_segmento_cortes_matematicos)
+ 
+        else:
+ 
+            ### CATEGORIZACIÓN CORTES MATEMÁTICOS ###
+            ## Filtrar por segmento comercial  ##
+            df_00_segmento_cortes_matematicos=predictions_pj_cortes_matematicos_activos.filter(col("nuevo_nivel_mod") == segmento)
+           
+            ## Importar los cortes por segmento comercial para cada categoría ##
+            corte_matematicos_A = cortes_df.filter((col('segmento')==segmento) & (col('categoria')=='A') & (col('modelo')=='CORTES MATEMATICOS')).select('corte').collect()[0][0]
+            corte_matematicos_B = cortes_df.filter((col('segmento')==segmento) & (col('categoria')=='B') & (col('modelo')=='CORTES MATEMATICOS')).select('corte').collect()[0][0]
+            corte_matematicos_C = cortes_df.filter((col('segmento')==segmento) & (col('categoria')=='C') & (col('modelo')=='CORTES MATEMATICOS')).select('corte').collect()[0][0]
+       
+            ## Asignar la categoría ##
+ 
+            def rank_classification_mat(val):
+                if val <= corte_matematicos_A: return 'A'
+                elif val <= corte_matematicos_B: return 'B'
+                elif val <= corte_matematicos_C: return 'C'
+                else: return 'D'
+            rank_function_cortes_matematicos = udf(lambda x: rank_classification_mat(x), StringType())
+            df_01_segmento_cortes_matematicos = df_00_segmento_cortes_matematicos.withColumn('categoria', rank_function_cortes_matematicos('probability'))
+           
+            if bandera:
+                df_segmento_cortes_matematicos=df_01_segmento_cortes_matematicos
+                bandera=False
+            else:
+                df_segmento_cortes_matematicos=df_segmento_cortes_matematicos.union(df_01_segmento_cortes_matematicos)
+ 
+    ################################################################################################################################
+    ################################################################################################################################
+## Asignación de categoría a clientes inactivos ##
+ 
+### CATEGORIZACIÓN CORTES MATEMÁTICOS ###
+## Filtrar por segmento comercial  ##
+df_00_inactivos_cortes_matematicos=predictions_pj_cortes_matematicos_inactivos
+## Asignar sin categoría ##
+df_01_inactivos_cortes_matematicos = df_00_inactivos_cortes_matematicos.withColumn('categoria', F.lit('Inactivos'))
+df_segmento_cortes_matematicos=df_segmento_cortes_matematicos.union(df_01_inactivos_cortes_matematicos)
+   
+## Renombramiento de ciertas columnas para igualar columnas ##
+df_segmento_cortes_matematicos = df_segmento_cortes_matematicos.withColumnRenamed('nuevo_nivel', 'segmento')
+df_segmento_cortes_matematicos = df_segmento_cortes_matematicos.withColumnRenamed('saldo_medio_actual', 'saldo_medio_total_actual')
+df_segmento_cortes_matematicos = df_segmento_cortes_matematicos.withColumnRenamed('probability', 'probabilidad_inestabilidad')
+df_segmento_cortes_matematicos = df_segmento_cortes_matematicos.withColumnRenamed('cod_tip_persona', 'codigo_tipo_persona')
+   
+spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+   
+df_segmento_cortes_matematicos \
+        .select([
+            'fec_info',
+            'buc_cliente',
+            'codigo_tipo_persona',
+            'segmento',
+            'categoria',
+            'probabilidad_inestabilidad',
+            'saldo_medio_total_actual',
+            'saldo_medio_vista_actual',
+            'saldo_medio_plazo_actual',
+            'saldo_medio_total_1m',
+            'saldo_medio_total_2m',
+            'saldo_medio_total_3m',
+            'saldo_medio_total_4m',
+            'saldo_medio_total_5m',
+            'saldo_medio_total_6m',
+            'saldo_medio_total_7m',
+            'saldo_medio_total_8m',
+            'saldo_medio_total_9m',
+            'saldo_medio_total_10m',
+            'saldo_medio_total_11m',
+            'saldo_medio_total_12m',
+            'id_activo'
+        ]) \
+        .write \
+        .mode('append') \
+        .format('hive') \
+        .partitionBy('fec_info') \
+        .saveAsTable('sb_gf.predicciones_modelo_estabilidad_pj_cortes_matematicos')
+
+
+spark.sql(f'DROP TABLE IF EXISTS sb_gf.ml_ready_estabilidad_00_{table_subfix}')
