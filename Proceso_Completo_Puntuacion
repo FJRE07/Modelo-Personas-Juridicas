@@ -115,6 +115,7 @@ GROUP BY id_mes;
 SELECT * FROM sb_gf.v_ind_gestion_bpriv_dl WHERE id_mes=
 
 -- 3. TABLA GRUPOS COMERCIALES --
+DROP TABLE IF EXISTS sb_gf.cat_grupos_gesfin_simplai;
 CREATE TABLE sb_gf.cat_grupos_gesfin_simplai AS 
 SELECT 
 	*
@@ -124,7 +125,7 @@ FROM (
 ROW_NUMBER() OVER (PARTITION BY cve_cliente ORDER BY fyh_carga_datos DESC) AS rn
     FROM dm_gf.cat_grupos_gesfin
 ) AS sub
-WHERE rn = 1
+WHERE rn = 1;
 
 -- 4. TRANSACCIONAL --
 CREATE TABLE sb_gf.tabla_movimientos_simplai_nivel_cliente_mayo_2024_nuevo AS
